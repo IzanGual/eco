@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Add, ChartPie, Checkmark, Copy, Download, Launch, UserMultiple, View } from '@carbon/icons-react';
-import { Press, Sheet, spring } from '../components/ui';
+import { Logo, Press, Sheet, spring } from '../components/ui';
 
 // ---------- Detección de plataforma ----------
 type BIPEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> };
@@ -77,7 +77,7 @@ export function Landing({ onContinue }: { onContinue: () => void }) {
       <div className="pt-safe mx-auto flex min-h-dvh max-w-md flex-col px-6 pb-10">
         <motion.header initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center justify-between pt-2">
           <span className="flex items-center gap-2 font-serif text-[26px]">
-            <img src="/icon.svg" alt="" className="h-8 w-8 rounded-[10px]" /> Eco
+            <Logo size={34} /> Eco
           </span>
           <button onClick={skip} className="text-[14px] font-semibold text-ink3">Usar en el navegador</button>
         </motion.header>
@@ -162,7 +162,7 @@ function InAppNotice() {
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="rounded-[22px] bg-surface p-5">
       <p className="font-serif text-[22px] leading-tight">Ábrela en tu navegador</p>
       <p className="mt-1.5 text-[14px] text-ink2">Desde aquí no se puede instalar. Toca ··· y elige «Abrir en Safari» (o en Chrome), o copia el enlace.</p>
-      <Press scale={0.97} onClick={async () => { await navigator.clipboard?.writeText(location.origin); setCopied(true); }} className="btn-ink mt-4 w-full">
+      <Press scale={0.97} onClick={async () => { await navigator.clipboard?.writeText(location.href.split('?')[0]); setCopied(true); }} className="btn-ink mt-4 w-full">
         {copied ? <><Checkmark size={18} /> Copiado</> : <><Copy size={18} /> Copiar enlace</>}
       </Press>
     </motion.div>
@@ -175,12 +175,12 @@ function InstallGuide({ ios, onClose }: { ios: boolean; onClose: () => void }) {
     ? [
         { n: 1, title: 'Toca Compartir', text: 'El cuadrado con la flecha hacia arriba, en la barra de Safari.', icon: <ShareGlyph /> },
         { n: 2, title: 'Añadir a pantalla de inicio', text: 'Desliza hacia abajo en el menú si no la ves.', icon: <span className="flex h-8 w-8 items-center justify-center rounded-[9px] border-[1.5px] border-current"><Add size={18} /></span> },
-        { n: 3, title: 'Pulsa «Añadir»', text: 'Arriba a la derecha. Eco aparecerá con su icono, como una app más.', icon: <img src="/icon.svg" alt="" className="h-8 w-8 rounded-[9px]" /> }
+        { n: 3, title: 'Pulsa «Añadir»', text: 'Arriba a la derecha. Eco aparecerá con su icono, como una app más.', icon: <Logo size={32} /> }
       ]
     : [
         { n: 1, title: 'Abre el menú del navegador', text: 'Los tres puntos, arriba a la derecha.', icon: <span className="text-[22px] font-bold leading-none">⋮</span> },
         { n: 2, title: 'Instalar aplicación', text: 'O «Añadir a pantalla de inicio».', icon: <Launch size={22} /> },
-        { n: 3, title: 'Confirma', text: 'Eco aparecerá con su icono, como una app más.', icon: <img src="/icon.svg" alt="" className="h-8 w-8 rounded-[9px]" /> }
+        { n: 3, title: 'Confirma', text: 'Eco aparecerá con su icono, como una app más.', icon: <Logo size={32} /> }
       ];
   return (
     <>

@@ -5,6 +5,7 @@ import { useData } from '../store';
 import { setSetting } from '../db';
 import { CatIcon, ICON_NAMES, PALETTE } from '../icons';
 import { fmt } from '../lib';
+import { LOGO_DOT, LOGO_E } from '../logo-path';
 
 export const spring = { type: 'spring', stiffness: 520, damping: 38, mass: 0.9 } as const;
 export const softSpring = { type: 'spring', stiffness: 260, damping: 30 } as const;
@@ -343,5 +344,16 @@ export function PrivacyToggle() {
         </motion.span>
       </AnimatePresence>
     </GlassIconButton>
+  );
+}
+
+// ---------- Logo «e.» que sigue el tema (tinta sobre papel / papel sobre tinta) ----------
+export function Logo({ size = 32, plain }: { size?: number; plain?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 512 512" aria-label="Eco" role="img" className="shrink-0">
+      {!plain && <rect width="512" height="512" rx="120" fill="rgb(var(--ink))" />}
+      <path d={LOGO_E} fill={plain ? 'rgb(var(--ink))' : 'rgb(var(--paper))'} />
+      <circle cx={LOGO_DOT.cx} cy={LOGO_DOT.cy} r={LOGO_DOT.r} fill="rgb(var(--accent))" />
+    </svg>
   );
 }

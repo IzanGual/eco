@@ -6,7 +6,7 @@ import { setSetting, type AppSettings } from '../db';
 import { exportBackup, exportCSV, importBackup, wipeAll } from '../lib';
 import { useData } from '../store';
 import { useNav } from '../nav';
-import { Group, LargeTitle, Press, Segmented, Tile, confirmDialog, spring, toast } from '../components/ui';
+import { Group, LargeTitle, Logo, Press, Segmented, Tile, confirmDialog, spring, toast } from '../components/ui';
 
 function Row({ icon, color, label, detail, onClick, right }: { icon: string; color: string; label: string; detail?: string; onClick?: () => void; right?: ReactNode }) {
   return (
@@ -121,8 +121,9 @@ export function Settings() {
         >
           Borrar todos los datos
         </Press>
-        <p className="mt-8 text-center font-serif text-[18px] text-ink3">Eco</p>
-        <p className="text-center text-[12px] text-ink3">versión 0.2</p>
+        <div className="mt-10 flex justify-center"><Logo size={44} /></div>
+        <p className="mt-2 text-center font-serif text-[18px] text-ink3">Eco</p>
+        <p className="text-center text-[12px] text-ink3">versión 0.3</p>
       </div>
     </div>
   );

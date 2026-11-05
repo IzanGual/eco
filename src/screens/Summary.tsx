@@ -4,7 +4,7 @@ import { Close } from '@carbon/icons-react';
 import { addDays, daysBetween, dayLabel, debtSummary, fmt, fromISO, getPeriod, todayISO, totals, walletBalances } from '../lib';
 import { useData } from '../store';
 import { useNav } from '../nav';
-import { BigAmount, Press, Tile } from '../components/ui';
+import { BigAmount, Logo, Press, Tile } from '../components/ui';
 
 const DURATION = 6000;
 const WEEKDAYS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
@@ -266,7 +266,7 @@ function Story({ slides, onClose }: { slides: ReactNode[]; onClose: () => void }
           ))}
         </div>
         <div className="mt-3 flex items-center justify-between">
-          <span className="font-serif text-[20px]">Eco</span>
+          <span className="flex items-center gap-2 font-serif text-[20px]"><Logo size={26} /> Eco</span>
           <button onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => { e.stopPropagation(); onClose(); }} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10" aria-label="Cerrar">
             <Close size={22} />
           </button>
