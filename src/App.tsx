@@ -12,6 +12,7 @@ import { TxEditor } from './screens/TxEditor';
 import { Budgets, BudgetEdit } from './screens/Budgets';
 import { Wallets, WalletEdit, Categories, CategoryEdit, RecurringList } from './screens/Manage';
 import { Summary } from './screens/Summary';
+import { Landing, shouldShowLanding } from './screens/Landing';
 import { People, PersonDetail } from './screens/People';
 import { ImportCSV } from './screens/Import';
 import type { TxType } from './db';
@@ -34,6 +35,8 @@ function initialStack(): Screen[] {
 let keySeq = 0;
 
 export default function App() {
+  // Si no está instalada, primero la landing con el botón de instalar (salvo enlaces directos)
+  const [landing, setLanding] = useState(() => shouldShowLanding() && !location.search.includes('nuevo='));
   const [tab, setTab] = useState<Tab>('home');
   const [stack, setStack] = useState<(Screen & { key: number })[]>(() => initialStack().map((s) => ({ ...s, key: keySeq++ })));
 
@@ -69,6 +72,8 @@ export default function App() {
     setTab(t);
     window.scrollTo(0, 0);
   };
+
+  if (landing) return <Landing onContinue={() => setLanding(false)} />;
 
   return (
     <NavCtx.Provider value={nav}>

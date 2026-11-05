@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, DEFAULT_SETTINGS, type AppSettings, type Category, type Person, type Recurring, type Transaction, type Wallet, type Budget } from './db';
 import { setCurrency } from './lib';
+import { scheduleBackup } from './cloud';
 
 interface Data {
   wallets: Wallet[]; // sin archivadas
@@ -70,6 +71,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
       settings
     };
   }, [allWallets, categories, txs, recurring, budgets, settingRows, settings, people]);
+
+  // Copia automática en la nube tras cada cambio (si hay sesión)
+  const firstLoad = useRef(true);
+  useEffect(() => {
+    if (!value) return;
+    if (firstLoad.current) { firstLoad.current = false; return; }
+    scheduleBackup();
+  }, [value]);
 
   if (!value) return <div className="min-h-dvh bg-paper" />;
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

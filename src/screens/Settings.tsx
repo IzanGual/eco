@@ -1,4 +1,5 @@
-import { useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { backupNow, cloudEnabled, cloudInfo, onUser, restoreFromCloud, signInWithGoogle, signOut, type CloudUser } from '../cloud';
 import { motion } from 'framer-motion';
 import { ChevronRight } from '@carbon/icons-react';
 import { setSetting, type AppSettings } from '../db';
@@ -51,6 +52,8 @@ export function Settings() {
             <p className="mt-1.5 text-[14px] opacity-70">En Safari, toca Compartir y luego «Añadir a pantalla de inicio». Se abrirá a pantalla completa, como cualquier app.</p>
           </div>
         )}
+
+        <Account />
 
         <p className="eyebrow px-1 pb-2 pt-6">Organizar</p>
         <Group>
@@ -120,6 +123,93 @@ export function Settings() {
         </Press>
         <p className="mt-8 text-center font-serif text-[18px] text-ink3">Eco</p>
         <p className="text-center text-[12px] text-ink3">versión 0.2</p>
+      </div>
+    </div>
+  );
+}
+
+function GoogleG() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+      <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z" />
+      <path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" />
+      <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z" />
+      <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z" />
+    </svg>
+  );
+}
+
+function ago(ms: number) {
+  const m = Math.round((Date.now() - ms) / 60000);
+  if (m < 1) return 'ahora mismo';
+  if (m < 60) return `hace ${m} min`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `hace ${h} h`;
+  return `hace ${Math.round(h / 24)} d`;
+}
+
+/** Cuenta de Google: copia automática en la nube y restaurar en otro móvil. */
+function Account() {
+  const [user, setUser] = useState<CloudUser | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState<number | null>(null);
+  useEffect(() => onUser(setUser), []);
+  useEffect(() => {
+    if (user) cloudInfo().then((i) => setSaved(i?.savedAt ?? null)).catch(() => {});
+  }, [user]);
+
+  if (!cloudEnabled) {
+    return import.meta.env.DEV ? (
+      <div className="rounded-[22px] border-[1.5px] border-dashed border-ink/20 p-4 text-[13px] text-ink3">
+        Para activar «Entrar con Google», crea <code>.env.local</code> con la configuración de Firebase (mira <code>.env.example</code>).
+      </div>
+    ) : null;
+  }
+
+  async function act(fn: () => Promise<unknown>, ok?: string) {
+    setBusy(true);
+    try {
+      await fn();
+      if (ok) toast(ok);
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!user) {
+    return (
+      <div className="rounded-[24px] bg-surface p-5">
+        <p className="font-serif text-[24px] leading-tight">Tus datos, a salvo</p>
+        <p className="mt-1.5 text-[14px] text-ink2">Entra con tu cuenta de Google y guardaremos una copia en la nube cada vez que cambies algo. Si cambias de móvil, lo recuperas todo.</p>
+        <Press scale={0.97} disabled={busy} onClick={() => act(signInWithGoogle)} className="mt-4 flex h-[52px] w-full items-center justify-center gap-3 rounded-full bg-raised text-[16px] font-semibold shadow-[0_1px_3px_rgb(var(--shadow)/0.15),inset_0_0_0_1px_rgb(var(--line)/0.08)]">
+          <GoogleG /> Continuar con Google
+        </Press>
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-[24px] bg-surface">
+      <div className="flex items-center gap-3.5 p-4">
+        {user.photo ? <img src={user.photo} alt="" className="h-12 w-12 rounded-full" referrerPolicy="no-referrer" /> : <span className="flex h-12 w-12 items-center justify-center rounded-full bg-ink text-[20px] font-semibold text-paper">{user.name[0]}</span>}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[16px] font-semibold">{user.name}</p>
+          <p className="truncate text-[13px] text-ink3">{user.email}</p>
+        </div>
+      </div>
+      <div className="divide-hair border-t hair">
+        <Row icon="package" color="#5E8C6A" label="Copia en la nube" detail={saved ? ago(saved) : 'nunca'} onClick={() => act(async () => setSaved(await backupNow()), 'Copia guardada en la nube')} right={<span className="text-[14px] font-semibold text-accent">{busy ? '…' : 'Guardar'}</span>} />
+        <Row
+          icon="undo"
+          color="#4F6D8F"
+          label="Recuperar desde la nube"
+          onClick={async () => {
+            if (await confirmDialog('¿Recuperar la copia de la nube?', { message: 'Se reemplazarán los datos de este móvil por los de la copia.', confirm: 'Recuperar' })) act(restoreFromCloud, 'Datos recuperados');
+          }}
+        />
+        <Row icon="people" color="#6B6760" label="Cerrar sesión" onClick={() => act(signOut)} right={<span />} />
       </div>
     </div>
   );

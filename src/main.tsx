@@ -4,11 +4,13 @@ import { registerSW } from 'virtual:pwa-register';
 import App from './App';
 import { DataProvider } from './store';
 import { seedIfEmpty } from './db';
+import { initCloud } from './cloud';
 import '@fontsource/instrument-serif/400.css';
 import '@fontsource-variable/instrument-sans';
 import './index.css';
 
 registerSW({ immediate: true });
+initCloud().catch(() => {});
 
 // Pide al navegador que no borre los datos aunque falte espacio
 navigator.storage?.persist?.().catch(() => {});

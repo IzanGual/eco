@@ -20,22 +20,22 @@ const chunk = (type, data) => {
 };
 
 function icon(size) {
-  const bg = [5, 150, 105], fg = [255, 255, 255];
+  const bg = [27, 26, 23], ring = [242, 238, 230], dot = [217, 71, 43];
   const raw = Buffer.alloc(size * (size * 3 + 1));
   const S = 4; // supersampling
   for (let y = 0; y < size; y++) {
     raw[y * (size * 3 + 1)] = 0;
     for (let x = 0; x < size; x++) {
-      let hits = 0;
+      const acc = [0, 0, 0];
       for (let sy = 0; sy < S; sy++) for (let sx = 0; sx < S; sx++) {
         const u = ((x + (sx + 0.5) / S) / size) * 512 - 256;
         const v = ((y + (sy + 0.5) / S) / size) * 512 - 256;
         const r = Math.hypot(u, v);
-        if (Math.abs(r - 150) <= 18 || r <= 62) hits++;
+        const c = Math.abs(r - 150) <= 18 ? ring : r <= 62 ? dot : bg;
+        for (let i = 0; i < 3; i++) acc[i] += c[i];
       }
-      const a = hits / (S * S);
       const o = y * (size * 3 + 1) + 1 + x * 3;
-      for (let i = 0; i < 3; i++) raw[o + i] = Math.round(bg[i] * (1 - a) + fg[i] * a);
+      for (let i = 0; i < 3; i++) raw[o + i] = Math.round(acc[i] / (S * S));
     }
   }
   const ihdr = Buffer.alloc(13);

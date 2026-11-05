@@ -4,3 +4,5 @@ dev-dist
 *.log
 *.tsbuildinfo
 .claude/
+.env.local
+.env*.local
