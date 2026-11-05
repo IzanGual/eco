@@ -62,6 +62,7 @@ export function Settings() {
           <Row icon="piggy" color="#C0627A" label="Presupuestos" onClick={() => nav.push({ name: 'budgets' })} />
           <Row icon="repeat" color="#2F7A78" label="Repeticiones" onClick={() => nav.push({ name: 'recurring' })} />
           <Row icon="people" color="#5A5A9E" label="Préstamos y personas" onClick={() => nav.push({ name: 'people' })} />
+          <Row icon="book" color="#A86F4C" label="Ver la bienvenida y el tutorial" onClick={() => setSetting('onboarded', false)} />
         </Group>
 
         <p className="eyebrow px-1 pb-2 pt-6">Preferencias</p>

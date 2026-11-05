@@ -144,7 +144,10 @@ const INCOME_SEED: Seed[] = [
 
 export async function seedIfEmpty() {
   const count = await db.wallets.count();
-  if (count > 0) return;
+  if (count > 0) {
+    if ((await db.transactions.count()) > 0 && !(await db.settings.get('onboarded'))) await db.settings.put({ key: 'onboarded', value: true });
+    return;
+  }
   await db.transaction('rw', db.wallets, db.categories, async () => {
     await db.wallets.bulkAdd([
       { name: 'Banco', icon: 'bank', color: '#4F6D8F', initialBalance: 0, order: 0 },
@@ -171,9 +174,10 @@ export interface AppSettings {
   monthStartDay: number; // 1-28: ciclo de cobro a cobro
   theme: 'system' | 'light' | 'dark';
   privacy: boolean; // «ojito»: difumina todas las cifras
+  onboarded: boolean; // ya ha pasado la bienvenida
 }
 
-export const DEFAULT_SETTINGS: AppSettings = { currency: 'EUR', monthStartDay: 1, theme: 'system', privacy: false };
+export const DEFAULT_SETTINGS: AppSettings = { currency: 'EUR', monthStartDay: 1, theme: 'system', privacy: false, onboarded: false };
 
 export async function getSettings(): Promise<AppSettings> {
   const rows = await db.settings.toArray();

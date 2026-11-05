@@ -51,6 +51,7 @@ export async function loadDemo() {
     { type: 'debt', dir: 'out', personId: ana, amount: 1000, walletId: 2, date: addDays(today, -1), note: 'Cine', createdAt: 3 }
   ]);
 
+  await db.settings.put({ key: 'onboarded', value: true });
   await db.budgets.bulkAdd([
     { name: 'Comida', amount: 40000, period: 'monthly', categoryIds: [id('Comida')], order: 0 },
     { name: 'Ocio', amount: 15000, period: 'monthly', categoryIds: [id('Ocio')], order: 1 },

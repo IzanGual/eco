@@ -13,6 +13,9 @@ import { Budgets, BudgetEdit } from './screens/Budgets';
 import { Wallets, WalletEdit, Categories, CategoryEdit, RecurringList } from './screens/Manage';
 import { Summary } from './screens/Summary';
 import { Landing, shouldShowLanding } from './screens/Landing';
+import { Onboarding } from './screens/Onboarding';
+import { useData } from './store';
+import { useRef } from 'react';
 import { People, PersonDetail } from './screens/People';
 import { ImportCSV } from './screens/Import';
 import type { TxType } from './db';
@@ -73,7 +76,16 @@ export default function App() {
     window.scrollTo(0, 0);
   };
 
+  // Bienvenida la primera vez; al acabar, si no hay nada apuntado, abrimos el formulario
+  const { settings, txs } = useData();
+  const wasOnboarded = useRef(settings.onboarded);
+  useEffect(() => {
+    if (!wasOnboarded.current && settings.onboarded && txs.length === 0) nav.push({ name: 'editor' });
+    wasOnboarded.current = settings.onboarded;
+  }, [settings.onboarded]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (landing) return <Landing onContinue={() => setLanding(false)} />;
+  if (!settings.onboarded) return <Onboarding />;
 
   return (
     <NavCtx.Provider value={nav}>
