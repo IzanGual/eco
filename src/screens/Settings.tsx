@@ -58,6 +58,7 @@ export function Settings() {
           <Row icon="tag" color="#C99A2E" label="Categorías" onClick={() => nav.push({ name: 'categories' })} />
           <Row icon="piggy" color="#C0627A" label="Presupuestos" onClick={() => nav.push({ name: 'budgets' })} />
           <Row icon="repeat" color="#2F7A78" label="Repeticiones" onClick={() => nav.push({ name: 'recurring' })} />
+          <Row icon="people" color="#5A5A9E" label="Préstamos y personas" onClick={() => nav.push({ name: 'people' })} />
         </Group>
 
         <p className="eyebrow px-1 pb-2 pt-6">Preferencias</p>
@@ -88,6 +89,7 @@ export function Settings() {
 
         <p className="eyebrow px-1 pb-2 pt-6">Tus datos</p>
         <Group>
+          <Row icon="app" color="#C4572E" label="Importar desde Soldi u otra app" onClick={() => nav.push({ name: 'import' })} />
           <Row icon="receipt" color="#5E8C6A" label="Exportar a Excel (CSV)" detail={`${txs.length} mov.`} onClick={() => run(exportCSV, 'CSV exportado')} />
           <Row icon="package" color="#A86F4C" label="Hacer copia de seguridad" onClick={() => run(exportBackup, 'Copia guardada')} />
           <Row icon="undo" color="#6B6760" label="Restaurar una copia" onClick={() => fileRef.current?.click()} />

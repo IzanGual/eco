@@ -4,7 +4,7 @@ App propia de gastos para iPhone, sin App Store, sin límites y sin pagos. Es un
 
 Funciones planificadas: [FUNCIONES.md](FUNCIONES.md).
 
-## Qué tiene la v0.1
+## Qué tiene
 
 - Gastos, ingresos y transferencias, con categorías y subcategorías, nota y foto del ticket
 - Movimientos futuros («Próximos») y repeticiones (diaria, semanal, mensual o anual) que se crean solas
@@ -14,7 +14,10 @@ Funciones planificadas: [FUNCIONES.md](FUNCIONES.md).
 - Buscador de movimientos
 - Mes de nómina a nómina (el mes puede empezar cualquier día)
 - Exportar a CSV (Excel), copia de seguridad y restaurarla
-- Modo claro y oscuro
+- Modo claro («Papel») y oscuro («Tinta»), y modo privacidad que difumina las cifras
+- Préstamos con personas («Mamá te debe 150 €»), sin contar como gasto ni ingreso, y gastos compartidos («alguien te debe una parte»)
+- Resúmenes semanales y mensuales en formato historia
+- Importar CSV desde Soldi, Excel o el banco (detecta columnas, crea categorías y salta duplicados)
 
 ## Desarrollo
 
@@ -40,6 +43,17 @@ La app abre directamente el formulario con:
 - `https://TU-URL/?nuevo=transferencia`
 
 Puedes crear un Atajo de iOS «Abrir URL» y ponerlo en la pantalla de bloqueo o en el botón de Acción.
+
+### Desde Apple Pay (en preparación)
+
+Los Atajos de iOS tienen una automatización **«Transacción»** que se dispara al pagar con Apple Pay.
+La app ya acepta `?nuevo=gasto&importe=12,50&nota=Mercadona` y rellena el formulario (y adivina la categoría por la nota).
+Pero iOS abre esos enlaces en Safari, no en la app instalada, y cada una guarda sus datos aparte. Para que el apunte
+llegue solo hace falta la sincronización en la nube (fase 2).
+
+## Probar con datos de ejemplo
+
+Solo en desarrollo: abre `http://localhost:5173/?demo`. **Borra los datos locales** y carga dos meses de ejemplo.
 
 ## Tecnología
 

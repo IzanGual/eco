@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Add, ArrowUpRight, ChevronRight } from '@carbon/icons-react';
-import { addDays, fmt, fromISO, getPeriod, todayISO, totals, walletBalances } from '../lib';
+import { addDays, debtSummary, fmt, fromISO, getPeriod, todayISO, totals, walletBalances } from '../lib';
 import { useData } from '../store';
 import { useNav } from '../nav';
 import { TxRow } from '../components/TxList';
@@ -18,6 +18,7 @@ export function Home() {
 
   const balances = useMemo(() => walletBalances(wallets, txs), [wallets, txs]);
   const total = wallets.reduce((s, w) => s + (balances.get(w.id!) ?? 0), 0);
+  const debts = useMemo(() => debtSummary(txs), [txs]);
   const m = useMemo(() => totals(txs.filter((t) => t.date >= period.start && t.date <= period.end && t.date <= today)), [txs, period.start, period.end, today]);
   const recent = useMemo(() => txs.filter((t) => t.date <= today).slice(0, 6), [txs, today]);
   const upcoming = txs.filter((t) => t.date > today).length;
@@ -51,6 +52,14 @@ export function Home() {
       <motion.section {...fade(0)} className="pt-6">
         <p className="eyebrow">Saldo total</p>
         <BigAmount cents={total} className={`mt-1 block text-[64px] tracking-[-0.02em] ${total < 0 ? 'text-accent' : ''}`} />
+        {(debts.owedToMe > 0 || debts.iOwe > 0) && (
+          <Press scale={0.97} onClick={() => nav.push({ name: 'people' })} className="mt-3 flex items-center gap-1.5 text-[14px] text-ink2">
+            {debts.owedToMe > 0 && <>Te deben <span className="num text-[18px] text-pos">{fmt(debts.owedToMe)}</span></>}
+            {debts.owedToMe > 0 && debts.iOwe > 0 && <span className="text-ink3">·</span>}
+            {debts.iOwe > 0 && <>debes <span className="num text-[18px] text-accent">{fmt(debts.iOwe)}</span></>}
+            <ChevronRight size={14} className="text-ink3" />
+          </Press>
+        )}
         <div className="mt-6 flex items-center gap-5 text-[14px]">
           <span className="text-ink2">{period.label}</span>
           <span>Entra <span className="num text-[18px] text-pos">{fmt(m.income, { compact: true })}</span></span>

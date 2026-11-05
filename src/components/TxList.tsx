@@ -11,7 +11,7 @@ const REVEAL = 84;
 
 /** Fila de movimiento. Desliza a la izquierda para eliminar. */
 export function TxRow({ t, showDate }: { t: Transaction; showDate?: boolean }) {
-  const { catMap, walletMap } = useData();
+  const { catMap, walletMap, personMap } = useData();
   const nav = useNav();
   const x = useMotionValue(0);
   const trashScale = useTransform(x, [-REVEAL, -20, 0], [1, 0.6, 0.4]);
@@ -23,8 +23,10 @@ export function TxRow({ t, showDate }: { t: Transaction; showDate?: boolean }) {
   const wallet = walletMap.get(t.walletId);
   const to = t.toWalletId != null ? walletMap.get(t.toWalletId) : undefined;
 
-  const title = t.note || (t.type === 'transfer' ? `${wallet?.name ?? '?'} → ${to?.name ?? '?'}` : cat?.name ?? 'Sin categoría');
-  const subtitle = [
+  const person = t.personId != null ? personMap.get(t.personId) : undefined;
+  const debtLabel = t.type === 'debt' ? (t.dir === 'in' ? `${person?.name ?? '?'} te da` : `Prestado a ${person?.name ?? '?'}`) : '';
+  const title = t.type === 'debt' ? debtLabel : t.note || (t.type === 'transfer' ? `${wallet?.name ?? '?'} → ${to?.name ?? '?'}` : cat?.name ?? 'Sin categoría');
+  const subtitle = t.type === 'debt' ? [t.note, showDate ? dayLabel(t.date) : null, wallet?.name, 'no cuenta como gasto'].filter(Boolean).join(' · ') : [
     t.type === 'transfer' ? (t.note ? `${wallet?.name} → ${to?.name}` : 'Transferencia') : t.note ? (parent ? `${parent.name} · ${cat?.name}` : cat?.name) : parent?.name,
     showDate ? dayLabel(t.date) : null,
     t.type !== 'transfer' ? wallet?.name : null
@@ -65,7 +67,9 @@ export function TxRow({ t, showDate }: { t: Transaction; showDate?: boolean }) {
         whileTap={{ backgroundColor: 'rgb(var(--ink) / 0.04)' }}
         className="relative flex w-full items-center gap-3.5 bg-surface px-4 py-3 text-left"
       >
-        {t.type === 'transfer' ? (
+        {t.type === 'debt' ? (
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[17px] font-semibold text-white" style={{ background: person?.color ?? '#6B6760' }}>{person?.name[0]?.toUpperCase() ?? '?'}</span>
+        ) : t.type === 'transfer' ? (
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-ink/[0.06] text-ink2"><ArrowsHorizontal size={20} /></span>
         ) : (
           <Tile icon={cat?.icon ?? 'tag'} color={cat?.color ?? '#6B6760'} />
@@ -78,8 +82,8 @@ export function TxRow({ t, showDate }: { t: Transaction; showDate?: boolean }) {
           </div>
           {subtitle && <div className="truncate text-[13px] text-ink3">{subtitle}</div>}
         </div>
-        <div className={`num shrink-0 text-[19px] ${t.type === 'income' ? 'text-pos' : t.type === 'transfer' ? 'text-ink3' : ''}`}>
-          {t.type === 'income' ? '+' : t.type === 'expense' ? '−' : ''}
+        <div className={`num shrink-0 text-[19px] ${t.type === 'income' ? 'text-pos' : t.type === 'transfer' || t.type === 'debt' ? 'text-ink3' : ''}`}>
+          {t.type === 'income' || (t.type === 'debt' && t.dir === 'in') ? '+' : t.type === 'expense' || (t.type === 'debt' && t.dir === 'out') ? '−' : ''}
           {fmt(t.amount)}
         </div>
       </motion.button>
@@ -98,7 +102,7 @@ export function TxList({ txs, empty }: { txs: Transaction[]; empty?: React.React
       let g = out[out.length - 1];
       if (!g || g.date !== t.date) out.push((g = { date: t.date, items: [], net: 0 }));
       g.items.push(t);
-      g.net += t.type === 'income' ? t.amount : t.type === 'expense' ? -t.amount : 0;
+      g.net += t.type === 'income' ? t.amount : t.type === 'expense' ? -t.amount : 0; // préstamos y transferencias no cuentan
     }
     return out;
   }, [txs, limit]);

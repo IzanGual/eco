@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, DEFAULT_SETTINGS, type AppSettings, type Category, type Recurring, type Transaction, type Wallet, type Budget } from './db';
+import { db, DEFAULT_SETTINGS, type AppSettings, type Category, type Person, type Recurring, type Transaction, type Wallet, type Budget } from './db';
 import { setCurrency } from './lib';
 
 interface Data {
@@ -12,6 +12,8 @@ interface Data {
   txs: Transaction[];
   recurring: Recurring[];
   budgets: Budget[];
+  people: Person[];
+  personMap: Map<number, Person>;
   settings: AppSettings;
 }
 
@@ -24,6 +26,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const recurring = useLiveQuery(() => db.recurring.toArray());
   const budgets = useLiveQuery(() => db.budgets.orderBy('order').toArray());
   const settingRows = useLiveQuery(() => db.settings.toArray());
+  const people = useLiveQuery(() => db.people.orderBy('name').toArray());
 
   const settings = useMemo<AppSettings>(() => {
     const s: Record<string, unknown> = { ...DEFAULT_SETTINGS };
@@ -52,7 +55,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   }, [settings.privacy]);
 
   const value = useMemo<Data | null>(() => {
-    if (!allWallets || !categories || !txs || !recurring || !budgets || !settingRows) return null;
+    if (!allWallets || !categories || !txs || !recurring || !budgets || !settingRows || !people) return null;
     return {
       allWallets,
       wallets: allWallets.filter((w) => !w.archived),
@@ -62,9 +65,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       txs,
       recurring,
       budgets,
+      people,
+      personMap: new Map(people.map((p) => [p.id!, p])),
       settings
     };
-  }, [allWallets, categories, txs, recurring, budgets, settingRows, settings]);
+  }, [allWallets, categories, txs, recurring, budgets, settingRows, settings, people]);
 
   if (!value) return <div className="min-h-dvh bg-paper" />;
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

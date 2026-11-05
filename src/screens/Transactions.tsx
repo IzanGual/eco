@@ -46,7 +46,7 @@ export function Transactions() {
 
   return (
     <div>
-      <LargeTitle title="Movimientos" right={<PrivacyToggle />} />
+      <LargeTitle title="Historial" right={<PrivacyToggle />} />
       <div className="px-5">
         <div className="relative mb-3">
           <Search size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-ink3" />

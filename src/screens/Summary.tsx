@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Close } from '@carbon/icons-react';
-import { addDays, daysBetween, dayLabel, fmt, fromISO, getPeriod, todayISO, totals } from '../lib';
+import { addDays, daysBetween, dayLabel, debtSummary, fmt, fromISO, getPeriod, todayISO, totals, walletBalances } from '../lib';
 import { useData } from '../store';
 import { useNav } from '../nav';
 import { BigAmount, Press, Tile } from '../components/ui';
@@ -12,7 +12,7 @@ const ease = [0.22, 1, 0.36, 1] as const;
 
 /** Resumen semanal o mensual, en formato historia. */
 export function Summary({ kind, offset }: { kind: 'week' | 'month'; offset: number }) {
-  const { txs, catMap, settings } = useData();
+  const { txs, catMap, settings, wallets } = useData();
   const nav = useNav();
   const today = todayISO();
 
@@ -47,8 +47,11 @@ export function Summary({ kind, offset }: { kind: 'week' | 'month'; offset: numb
       .slice(0, 4);
 
     const biggest = expenses.reduce<(typeof expenses)[number] | undefined>((a, b) => (!a || b.amount > a.amount ? b : a), undefined);
-    return { p, tt, tp, days, maxDay, zeroDays, elapsed, cats, biggest, count: inP.length, partial: end < p.end };
-  }, [txs, catMap, kind, offset, settings.monthStartDay, today]);
+    const debts = debtSummary(txs, end);
+    const bal = walletBalances(wallets, txs, end);
+    const money = wallets.reduce((a, w) => a + (bal.get(w.id!) ?? 0), 0);
+    return { debts, money, p, tt, tp, days, maxDay, zeroDays, elapsed, cats, biggest, count: inP.length, partial: end < p.end };
+  }, [txs, catMap, kind, offset, settings.monthStartDay, today, wallets]);
 
   const { p, tt, tp, days, maxDay, zeroDays, elapsed, cats, biggest } = data;
   const diff = tp.expense ? (tt.expense - tp.expense) / tp.expense : null;
@@ -177,6 +180,16 @@ export function Summary({ kind, offset }: { kind: 'week' | 'month'; offset: numb
           </div>
         </Reveal>
         {tt.income > 0 && saved > 0 && <Reveal delay={0.9}><Text>Has ahorrado el {Math.round((saved / tt.income) * 100)} % de lo que entró.</Text></Reveal>}
+        {(data.debts.owedToMe > 0 || data.debts.iOwe > 0) && (
+          <Reveal delay={1}>
+            <div className="mt-6 rounded-[20px] bg-paper/10 p-4 text-[15px] leading-relaxed">
+              Tienes <span className="money font-semibold">{fmt(data.money)}</span> en tus carteras.
+              {data.debts.owedToMe > 0 && <> Te deben <span className="money font-semibold text-pos">{fmt(data.debts.owedToMe)}</span>.</>}
+              {data.debts.iOwe > 0 && <> Debes <span className="money font-semibold text-accent">{fmt(data.debts.iOwe)}</span>.</>}
+              {' '}Con todo saldado tendrías <span className="money font-semibold">{fmt(data.money + data.debts.owedToMe - data.debts.iOwe)}</span>.
+            </div>
+          </Reveal>
+        )}
         <Reveal delay={1.1}>
           <Press scale={0.96} className="btn mt-8 bg-paper text-ink" onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => { e.stopPropagation(); nav.pop(); }}>Hecho</Press>
         </Reveal>

@@ -1,7 +1,9 @@
 import Dexie, { type Table } from 'dexie';
 import { EMOJI_TO_ICON, ICONS, OLD_COLOR_TO_NEW } from './icons';
 
-export type TxType = 'expense' | 'income' | 'transfer';
+/** debt = préstamo con una persona: no cuenta como gasto ni ingreso */
+export type TxType = 'expense' | 'income' | 'transfer' | 'debt';
+export type DebtDir = 'out' | 'in'; // out: sale dinero hacia la persona · in: la persona me da dinero
 export type CatType = 'expense' | 'income';
 export type Frequency = 'daily' | 'weekly' | 'monthly' | 'yearly';
 export type BudgetPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
@@ -37,7 +39,16 @@ export interface Transaction {
   note: string;
   photo?: Blob;
   recurringId?: number;
+  personId?: number; // solo préstamos
+  dir?: DebtDir; // solo préstamos
   createdAt: number;
+}
+
+export interface Person {
+  id?: number;
+  name: string;
+  color: string;
+  archived?: boolean;
 }
 
 export interface Recurring {
@@ -74,6 +85,7 @@ class EcoDB extends Dexie {
   recurring!: Table<Recurring, number>;
   budgets!: Table<Budget, number>;
   settings!: Table<Setting, string>;
+  people!: Table<Person, number>;
 
   constructor() {
     super('eco');
@@ -96,6 +108,11 @@ class EcoDB extends Dexie {
         await tx.table('categories').toCollection().modify(fix);
         await tx.table('wallets').toCollection().modify(fix);
       });
+    // v3: personas y préstamos
+    this.version(3).stores({
+      transactions: '++id, date, type, walletId, toWalletId, categoryId, recurringId, personId',
+      people: '++id, name'
+    });
   }
 }
 

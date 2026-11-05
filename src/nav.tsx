@@ -10,6 +10,9 @@ export type Screen =
   | { name: 'budgets' }
   | { name: 'budgetEdit'; id?: number }
   | { name: 'recurring' }
+  | { name: 'people' }
+  | { name: 'person'; id: number }
+  | { name: 'import' }
   | { name: 'summary'; kind: 'week' | 'month'; offset: number }
   | { name: 'filtered'; title: string; categoryId?: number; walletId?: number; start?: string; end?: string };
 

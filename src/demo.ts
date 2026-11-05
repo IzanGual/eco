@@ -42,6 +42,15 @@ export async function loadDemo() {
   txs.push({ type: 'expense' as const, amount: 6400, walletId: 1, categoryId: id('Luz'), date: addDays(today, 6), note: 'Factura luz', createdAt: 0 });
   await db.transactions.bulkAdd(txs.map((t, i) => ({ ...t, createdAt: i })));
 
+  // Préstamos: Bizum de 300 € a mamá, que devuelve 150 € en efectivo; 10 € a la hermana
+  const mama = await db.people.add({ name: 'Mamá', color: '#C0627A' });
+  const ana = await db.people.add({ name: 'Ana', color: '#2F7A78' });
+  await db.transactions.bulkAdd([
+    { type: 'debt', dir: 'out', personId: mama, amount: 30000, walletId: 1, date: addDays(today, -12), note: 'Bizum', createdAt: 1 },
+    { type: 'debt', dir: 'in', personId: mama, amount: 15000, walletId: 2, date: addDays(today, -4), note: 'En efectivo', createdAt: 2 },
+    { type: 'debt', dir: 'out', personId: ana, amount: 1000, walletId: 2, date: addDays(today, -1), note: 'Cine', createdAt: 3 }
+  ]);
+
   await db.budgets.bulkAdd([
     { name: 'Comida', amount: 40000, period: 'monthly', categoryIds: [id('Comida')], order: 0 },
     { name: 'Ocio', amount: 15000, period: 'monthly', categoryIds: [id('Ocio')], order: 1 },

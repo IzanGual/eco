@@ -191,6 +191,7 @@ export function walletBalances(wallets: Wallet[], txs: Transaction[], upTo = tod
     if (t.date > upTo) continue;
     if (t.type === 'income') map.set(t.walletId, (map.get(t.walletId) ?? 0) + t.amount);
     else if (t.type === 'expense') map.set(t.walletId, (map.get(t.walletId) ?? 0) - t.amount);
+    else if (t.type === 'debt') map.set(t.walletId, (map.get(t.walletId) ?? 0) + (t.dir === 'in' ? t.amount : -t.amount));
     else {
       map.set(t.walletId, (map.get(t.walletId) ?? 0) - t.amount);
       if (t.toWalletId != null) map.set(t.toWalletId, (map.get(t.toWalletId) ?? 0) + t.amount);
@@ -199,6 +200,27 @@ export function walletBalances(wallets: Wallet[], txs: Transaction[], upTo = tod
   return map;
 }
 
+/** Saldo con cada persona: positivo = te debe; negativo = le debes. */
+export function personBalances(txs: Transaction[], upTo = todayISO()) {
+  const map = new Map<number, number>();
+  for (const t of txs) {
+    if (t.type !== 'debt' || t.personId == null || t.date > upTo) continue;
+    map.set(t.personId, (map.get(t.personId) ?? 0) + (t.dir === 'in' ? -t.amount : t.amount));
+  }
+  return map;
+}
+
+export function debtSummary(txs: Transaction[], upTo = todayISO()) {
+  let owedToMe = 0;
+  let iOwe = 0;
+  for (const v of personBalances(txs, upTo).values()) {
+    if (v > 0) owedToMe += v;
+    else iOwe -= v;
+  }
+  return { owedToMe, iOwe };
+}
+
+/** Solo gastos e ingresos: transferencias y préstamos no cuentan en los análisis. */
 export function totals(txs: Transaction[]) {
   let income = 0;
   let expense = 0;
@@ -263,12 +285,13 @@ export async function exportCSV() {
   const catMap = new Map(cats.map((c) => [c.id!, c]));
   const wMap = new Map(wallets.map((w) => [w.id!, w]));
   const esc = (v: string) => (/[";\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-  const TYPE = { expense: 'Gasto', income: 'Ingreso', transfer: 'Transferencia' };
-  const rows = [['Fecha', 'Tipo', 'Importe', 'Categoría', 'Subcategoría', 'Cartera', 'Cartera destino', 'Nota']];
+  const TYPE = { expense: 'Gasto', income: 'Ingreso', transfer: 'Transferencia', debt: 'Préstamo' };
+  const people = new Map((await db.people.toArray()).map((p) => [p.id!, p.name]));
+  const rows = [['Fecha', 'Tipo', 'Importe', 'Categoría', 'Subcategoría', 'Cartera', 'Cartera destino', 'Persona', 'Nota']];
   for (const t of txs) {
     const c = t.categoryId != null ? catMap.get(t.categoryId) : undefined;
     const parent = c?.parentId != null ? catMap.get(c.parentId) : undefined;
-    const signed = t.type === 'expense' ? -t.amount : t.amount;
+    const signed = t.type === 'expense' || (t.type === 'debt' && t.dir === 'out') ? -t.amount : t.amount;
     rows.push([
       t.date,
       TYPE[t.type],
@@ -277,6 +300,7 @@ export async function exportCSV() {
       parent ? c!.name : '',
       wMap.get(t.walletId)?.name ?? '',
       t.toWalletId != null ? wMap.get(t.toWalletId)?.name ?? '' : '',
+      t.personId != null ? people.get(t.personId) ?? '' : '',
       t.note
     ]);
   }
@@ -304,6 +328,7 @@ export async function exportBackup() {
     recurring: await db.recurring.toArray(),
     budgets: await db.budgets.toArray(),
     settings: await db.settings.toArray(),
+    people: await db.people.toArray(),
     transactions: await Promise.all(
       txs.map(async (t) => (t.photo ? { ...t, photo: await blobToDataURL(t.photo) } : t))
     )
@@ -319,8 +344,9 @@ export async function importBackup(file: File) {
       typeof t.photo === 'string' ? { ...t, photo: await (await fetch(t.photo)).blob() } : t
     )
   );
-  await db.transaction('rw', [db.wallets, db.categories, db.recurring, db.budgets, db.settings, db.transactions], async () => {
-    await Promise.all([db.wallets.clear(), db.categories.clear(), db.recurring.clear(), db.budgets.clear(), db.settings.clear(), db.transactions.clear()]);
+  await db.transaction('rw', [db.wallets, db.categories, db.recurring, db.budgets, db.settings, db.transactions, db.people], async () => {
+    await Promise.all([db.wallets.clear(), db.categories.clear(), db.recurring.clear(), db.budgets.clear(), db.settings.clear(), db.transactions.clear(), db.people.clear()]);
+    await db.people.bulkAdd(data.people ?? []);
     await db.wallets.bulkAdd(data.wallets);
     await db.categories.bulkAdd(data.categories);
     await db.recurring.bulkAdd(data.recurring);
