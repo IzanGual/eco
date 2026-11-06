@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useHousehold } from './Couple';
 import { backupNow, cloudEnabled, cloudInfo, onUser, restoreFromCloud, signInWithGoogle, signOut, type CloudUser } from '../cloud';
 import { motion } from 'framer-motion';
 import { ChevronRight } from '@carbon/icons-react';
@@ -30,6 +31,7 @@ export function Switch({ on }: { on: boolean }) {
 export function Settings() {
   const { settings, txs } = useData();
   const nav = useNav();
+  const house = useHousehold();
   const fileRef = useRef<HTMLInputElement>(null);
   const standalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone;
 
@@ -61,6 +63,7 @@ export function Settings() {
           <Row icon="tag" color="#C99A2E" label="Categorías" onClick={() => nav.push({ name: 'categories' })} />
           <Row icon="piggy" color="#C0627A" label="Presupuestos" onClick={() => nav.push({ name: 'budgets' })} />
           <Row icon="repeat" color="#2F7A78" label="Repeticiones" onClick={() => nav.push({ name: 'recurring' })} />
+          <Row icon="heart" color="#C0627A" label="En pareja" detail={house ? 'Compartiendo' : undefined} onClick={() => nav.push({ name: 'couple' })} />
           <Row icon="people" color="#5A5A9E" label="Préstamos y personas" onClick={() => nav.push({ name: 'people' })} />
           <Row icon="book" color="#A86F4C" label="Ver la bienvenida y el tutorial" onClick={() => setSetting('onboarded', false)} />
         </Group>

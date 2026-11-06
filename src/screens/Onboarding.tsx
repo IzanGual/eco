@@ -120,8 +120,9 @@ export function Onboarding() {
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: `${-dir * 40}%`, opacity: 0 }}
             transition={{ duration: 0.45, ease }}
-            className="absolute inset-0 flex flex-col overflow-y-auto px-6 pb-6"
+            className="absolute inset-0 overflow-y-auto overscroll-contain"
           >
+            <div className="flex min-h-full flex-col px-6 pb-6 [&>*]:shrink-0 [&>.flex-1]:shrink">
             {step === 'welcome' && (
               <>
                 <div className="flex-1" />
@@ -239,6 +240,7 @@ export function Onboarding() {
             )}
 
             {step === 'tour' && <Tour onDone={finish} hasData={txs.length > 0} />}
+            </div>
           </motion.div>
         </AnimatePresence>
       </div>

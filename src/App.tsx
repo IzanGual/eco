@@ -12,15 +12,23 @@ import { TxEditor } from './screens/TxEditor';
 import { Budgets, BudgetEdit } from './screens/Budgets';
 import { Wallets, WalletEdit, Categories, CategoryEdit, RecurringList } from './screens/Manage';
 import { Summary } from './screens/Summary';
-import { Landing, shouldShowLanding } from './screens/Landing';
+import { Landing, isStandalone, shouldShowLanding } from './screens/Landing';
 import { Onboarding } from './screens/Onboarding';
 import { useData } from './store';
 import { useRef } from 'react';
 import { People, PersonDetail } from './screens/People';
 import { ImportCSV } from './screens/Import';
+import { Couple } from './screens/Couple';
 import type { TxType } from './db';
 
 type Tab = 'home' | 'txs' | 'stats' | 'settings';
+
+// Enlace de invitación de pareja: ?unirse=CODIGO (se guarda hasta que haya sesión y bienvenida)
+const joinParam = new URLSearchParams(location.search).get('unirse');
+if (joinParam) {
+  localStorage.setItem('eco:pendingJoin', joinParam.toUpperCase());
+  history.replaceState(null, '', location.pathname);
+}
 
 function initialStack(): Screen[] {
   // Atajo: /?nuevo=gasto | ingreso | transferencia abre directamente el formulario
@@ -41,6 +49,7 @@ export default function App() {
   // Si no está instalada, primero la landing con el botón de instalar (salvo enlaces directos)
   const [landing, setLanding] = useState(() => shouldShowLanding() && !location.search.includes('nuevo='));
   const [tab, setTab] = useState<Tab>('home');
+  const [pillHidden, setPillHidden] = useState(false);
   const [stack, setStack] = useState<(Screen & { key: number })[]>(() => initialStack().map((s) => ({ ...s, key: keySeq++ })));
 
   useEffect(() => {
@@ -84,6 +93,18 @@ export default function App() {
     wasOnboarded.current = settings.onboarded;
   }, [settings.onboarded]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Con una pantalla o una hoja abierta, lo de detrás no se mueve (iOS arrastraba el scroll del fondo)
+  useEffect(() => {
+    const lock = stack.length > 0;
+    document.documentElement.classList.toggle('scroll-locked', lock);
+  }, [stack.length]);
+
+  // Invitación pendiente: abrimos la pantalla de pareja con el código ya puesto
+  useEffect(() => {
+    const code = localStorage.getItem('eco:pendingJoin');
+    if (code && settings.onboarded && !landing) nav.push({ name: 'couple', code });
+  }, [settings.onboarded, landing]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (landing) return <Landing onContinue={() => setLanding(false)} />;
   if (!settings.onboarded) return <Onboarding />;
 
@@ -105,6 +126,16 @@ export default function App() {
         </motion.main>
       </AnimatePresence>
 
+      {!isStandalone() && !pillHidden && (
+        <motion.div initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 1 }} className="fixed inset-x-0 bottom-[calc(max(env(safe-area-inset-bottom),10px)+84px)] z-20 flex justify-center px-4">
+          <div className="glass flex items-center gap-1 rounded-full py-1 pl-4 pr-1 text-[14px]">
+            <span className="text-ink2">Estás en el navegador.</span>
+            <Press scale={0.94} onClick={() => setLanding(true)} className="rounded-full bg-ink px-3.5 py-1.5 font-semibold text-paper">Instalar</Press>
+            <button onClick={() => setPillHidden(true)} className="p-1.5 text-ink3" aria-label="Ocultar">×</button>
+          </div>
+        </motion.div>
+      )}
+
       <TabBar tab={tab} onTab={selectTab} onAdd={() => nav.push({ name: 'editor' })} />
 
       <AnimatePresence>
@@ -122,7 +153,7 @@ export default function App() {
 
 function ScreenView({ s }: { s: Screen }) {
   switch (s.name) {
-    case 'editor': return <TxEditor id={s.id} type={s.type} defaults={s.defaults} />;
+    case 'editor': return <TxEditor id={s.id} type={s.type} defaults={s.defaults} repeat={s.repeat} />;
     case 'wallets': return <Wallets />;
     case 'walletEdit': return <WalletEdit id={s.id} />;
     case 'categories': return <Categories />;
@@ -134,6 +165,7 @@ function ScreenView({ s }: { s: Screen }) {
     case 'people': return <People />;
     case 'person': return <PersonDetail id={s.id} />;
     case 'import': return <ImportCSV />;
+    case 'couple': return <Couple code={s.code} />;
     case 'filtered': return <Filtered {...s} />;
   }
 }

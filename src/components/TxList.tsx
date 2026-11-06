@@ -6,12 +6,15 @@ import { dayLabel, fmt } from '../lib';
 import { useData } from '../store';
 import { useNav } from '../nav';
 import { Press, Tile, confirmDialog, toast } from './ui';
+import { useHousehold } from '../screens/Couple';
+import { memberName } from '../sync';
 
 const REVEAL = 84;
 
 /** Fila de movimiento. Desliza a la izquierda para eliminar. */
 export function TxRow({ t, showDate }: { t: Transaction; showDate?: boolean }) {
   const { catMap, walletMap, personMap } = useData();
+  const house = useHousehold();
   const nav = useNav();
   const x = useMotionValue(0);
   const trashScale = useTransform(x, [-REVEAL, -20, 0], [1, 0.6, 0.4]);
@@ -79,6 +82,9 @@ export function TxRow({ t, showDate }: { t: Transaction; showDate?: boolean }) {
             <span className="truncate text-[15px] font-medium">{title}</span>
             {t.recurringId != null && <Repeat size={14} className="shrink-0 text-ink3" />}
             {t.photo && <ImageIcon size={14} className="shrink-0 text-ink3" />}
+            {t.by && house && house.members.length > 1 && (
+              <span title={`Apuntado por ${memberName(t.by)}`} className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-ink/10 px-1 text-[10px] font-bold text-ink2">{memberName(t.by)?.[0]}</span>
+            )}
           </div>
           {subtitle && <div className="truncate text-[13px] text-ink3">{subtitle}</div>}
         </div>

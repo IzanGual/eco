@@ -1,8 +1,8 @@
 import { createContext, useContext } from 'react';
-import type { Transaction, TxType, CatType } from './db';
+import type { Transaction, TxType, CatType, Frequency } from './db';
 
 export type Screen =
-  | { name: 'editor'; id?: number; type?: TxType; defaults?: Partial<Transaction> }
+  | { name: 'editor'; id?: number; type?: TxType; defaults?: Partial<Transaction>; repeat?: Frequency }
   | { name: 'wallets' }
   | { name: 'walletEdit'; id?: number }
   | { name: 'categories' }
@@ -13,6 +13,7 @@ export type Screen =
   | { name: 'people' }
   | { name: 'person'; id: number }
   | { name: 'import' }
+  | { name: 'couple'; code?: string }
   | { name: 'summary'; kind: 'week' | 'month'; offset: number }
   | { name: 'filtered'; title: string; categoryId?: number; walletId?: number; start?: string; end?: string };
 

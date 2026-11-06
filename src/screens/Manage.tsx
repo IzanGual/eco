@@ -273,9 +273,9 @@ export function RecurringList() {
   }
 
   return (
-    <Page title="Repeticiones" onBack={nav.pop}>
+    <Page title="Repeticiones" onBack={nav.pop} right={<GlassIconButton onClick={() => nav.push({ name: 'editor', repeat: 'monthly' })} label="Nueva repetición"><Add size={22} /></GlassIconButton>}>
       {sorted.length === 0 ? (
-        <Empty icon="repeat" title="Nada se repite aún" text="Alquiler, nómina, Netflix… Apúntalos una vez, elige «Repetir» y se crearán solos." />
+        <Empty icon="repeat" title="Nada se repite aún" text="Alquiler, nómina, Netflix… Apúntalos una vez y se crearán solos cada mes." action={<Press className="btn-ink" onClick={() => nav.push({ name: 'editor', repeat: 'monthly' })}>Crear repetición</Press>} />
       ) : (
         <>
           <p className="eyebrow px-1">Gastos fijos al mes, aprox.</p>

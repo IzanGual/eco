@@ -40,6 +40,20 @@ Sin organizaciones ni consola de Google Cloud: Firebase crea solo el cliente de 
 
 Con sesión iniciada, Eco guarda una copia en la nube tras cada cambio (sin las fotos) y puedes recuperarla en otro móvil.
 
+**Si cambian las reglas** (por ejemplo, al añadir el modo pareja), vuelve a pegar [`firestore.rules`](firestore.rules) en Firestore → Reglas → Publicar.
+
+### En pareja
+
+Ajustes → En pareja → «Crear espacio e invitar». Se genera un código de 6 letras y un enlace `…/eco/?unirse=CODIGO`.
+Tu pareja abre el enlace (o escribe el código) y los dos veis y apuntáis lo mismo en tiempo real. Cada movimiento lleva la
+inicial de quien lo apuntó, y en Análisis se ve cuánto ha apuntado cada uno. Las fotos se quedan en el móvil de quien las hizo.
+
+### Sesión en el iPhone
+
+En iPhone, la app instalada tiene su propio almacenamiento, separado de Safari, así que no ve la cuenta de Google de Safari.
+Pero iOS 17.2+ copia las cookies de Safari al instalar: si en la landing pulsas **«Entrar con Google e instalar»**, la app se abre
+ya con tu sesión (durante la hora siguiente).
+
 ## Instalar en el iPhone
 
 1. Publicar la carpeta `dist/` en un hosting con HTTPS (Cloudflare Pages, Vercel o Netlify; todos gratis).

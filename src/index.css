@@ -178,3 +178,10 @@ button {
 .privacy .money-chart {
   filter: blur(6px);
 }
+
+/* Bloqueo del scroll del fondo con una hoja abierta */
+html.scroll-locked,
+html.scroll-locked body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}

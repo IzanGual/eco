@@ -13,7 +13,7 @@ const config = {
 export const cloudEnabled = !!(config.apiKey && config.projectId);
 
 let fb: Promise<{ auth: Auth; fs: Firestore }> | null = null;
-function load() {
+export function load() {
   if (!cloudEnabled) return Promise.reject(new Error('Falta configurar Firebase'));
   fb ??= (async () => {
     const [{ initializeApp }, { getAuth, setPersistence, indexedDBLocalPersistence }, { getFirestore }] = await Promise.all([
@@ -35,6 +35,7 @@ export interface CloudUser { uid: string; name: string; email: string; photo?: s
 const toUser = (u: User | null): CloudUser | null => (u ? { uid: u.uid, name: u.displayName ?? '', email: u.email ?? '', photo: u.photoURL ?? undefined } : null);
 
 let current: CloudUser | null = null;
+export const currentUser = () => current;
 const subs = new Set<(u: CloudUser | null) => void>();
 export function onUser(cb: (u: CloudUser | null) => void) {
   subs.add(cb);
@@ -42,11 +43,36 @@ export function onUser(cb: (u: CloudUser | null) => void) {
   return () => { subs.delete(cb); };
 }
 
+// ---------- Traspaso de sesión Safari → app instalada ----------
+// En iPhone la app instalada tiene sus propias cookies y almacenamiento, separados de Safari, pero iOS (17.2+)
+// copia las cookies de Safari al instalar. Si entras con Google en Safari antes de instalar, guardamos la
+// credencial de Google en una cookie de vida corta y la app la usa al abrirse por primera vez.
+const HANDOFF = 'eco_handoff';
+const cookiePath = () => import.meta.env.BASE_URL;
+function saveHandoff(idToken?: string | null, accessToken?: string | null) {
+  if (!idToken && !accessToken) return;
+  const v = encodeURIComponent(JSON.stringify({ i: idToken, a: accessToken }));
+  document.cookie = `${HANDOFF}=${v}; max-age=3300; path=${cookiePath()}; samesite=strict${location.protocol === 'https:' ? '; secure' : ''}`;
+}
+function readHandoff(): { i?: string; a?: string } | null {
+  const m = document.cookie.match(new RegExp(`(?:^|; )${HANDOFF}=([^;]*)`));
+  if (!m) return null;
+  try { return JSON.parse(decodeURIComponent(m[1])); } catch { return null; }
+}
+const clearHandoff = () => { document.cookie = `${HANDOFF}=; max-age=0; path=${cookiePath()}`; };
+
 export async function initCloud() {
   if (!cloudEnabled) return;
   const { auth } = await load();
-  const { onAuthStateChanged, getRedirectResult } = await import('firebase/auth');
-  getRedirectResult(auth).catch(() => {});
+  const { onAuthStateChanged, getRedirectResult, GoogleAuthProvider, signInWithCredential } = await import('firebase/auth');
+  getRedirectResult(auth).then((r) => { if (r) { const c = GoogleAuthProvider.credentialFromResult(r); saveHandoff(c?.idToken, c?.accessToken); } }).catch(() => {});
+  await auth.authStateReady();
+  // Primera vez en la app instalada: si Safari nos dejó la credencial, entramos sin pedir nada
+  const h = readHandoff();
+  if (h && !auth.currentUser) {
+    try { await signInWithCredential(auth, GoogleAuthProvider.credential(h.i ?? null, h.a ?? null)); } catch { /* caducada: se entra a mano */ }
+  }
+  if (h && auth.currentUser) clearHandoff();
   onAuthStateChanged(auth, (u) => {
     current = toUser(u);
     subs.forEach((s) => s(current));
@@ -59,7 +85,10 @@ export async function signInWithGoogle() {
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
   try {
-    await signInWithPopup(auth, provider);
+    const r = await signInWithPopup(auth, provider);
+    const c = GoogleAuthProvider.credentialFromResult(r);
+    // Solo en el navegador: deja la credencial lista para cuando se instale la app
+    if (!window.matchMedia('(display-mode: standalone)').matches) saveHandoff(c?.idToken, c?.accessToken);
   } catch (e) {
     const code = (e as { code?: string }).code ?? '';
     if (code.includes('popup-blocked') || code.includes('operation-not-supported')) await signInWithRedirect(auth, provider);
@@ -68,6 +97,7 @@ export async function signInWithGoogle() {
 }
 
 export async function signOut() {
+  clearHandoff();
   const { auth } = await load();
   const { signOut: so } = await import('firebase/auth');
   await so(auth);

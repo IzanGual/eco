@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Add, ArrowRight, Calendar, Camera, Checkmark, ChevronLeft, ChevronRight, Close, Edit, Erase, Repeat, Search, Subtract, TrashCan, UserMultiple, Wallet as WalletIcon
+  Add, ArrowRight, Calendar, Grid, Camera, Checkmark, ChevronLeft, ChevronRight, Close, Edit, Erase, Repeat, Search, Subtract, TrashCan, UserMultiple, Wallet as WalletIcon
 } from '@carbon/icons-react';
 import { db, type Category, type DebtDir, type Frequency, type Transaction, type TxType } from '../db';
-import { centsToInput, compressImage, dayLabel, FREQ_LABEL, fmt, nextOccurrence, parseAmount, personBalances, processRecurring, todayISO } from '../lib';
+import { addDays, centsToInput, compressImage, dayLabel, FREQ_LABEL, fmt, nextOccurrence, parseAmount, personBalances, processRecurring, todayISO } from '../lib';
 import { useData } from '../store';
 import { useNav } from '../nav';
 import { CatIcon, PALETTE } from '../icons';
@@ -28,7 +28,7 @@ const hasOp = (e: string) => /[+−]/.test(e.slice(1));
 const TITLES: Record<TxType, string> = { expense: 'Nuevo gasto', income: 'Nuevo ingreso', transfer: 'Mover dinero', debt: 'Préstamo' };
 const SAVE: Record<TxType, string> = { expense: 'Guardar gasto', income: 'Guardar ingreso', transfer: 'Guardar', debt: 'Guardar' };
 
-export function TxEditor({ id, type: initialType, defaults }: { id?: number; type?: TxType; defaults?: Partial<Transaction> }) {
+export function TxEditor({ id, type: initialType, defaults, repeat: initialRepeat }: { id?: number; type?: TxType; defaults?: Partial<Transaction>; repeat?: Frequency }) {
   const { categories, wallets, catMap, walletMap, recurring, txs, people, personMap } = useData();
   const nav = useNav();
   const isNew = id == null;
@@ -45,7 +45,7 @@ export function TxEditor({ id, type: initialType, defaults }: { id?: number; typ
   const [date, setDate] = useState(defaults?.date ?? todayISO());
   const [note, setNote] = useState(defaults?.note ?? '');
   const [photo, setPhoto] = useState<Blob | undefined>();
-  const [repeat, setRepeat] = useState<Frequency | ''>('');
+  const [repeat, setRepeat] = useState<Frequency | ''>(initialRepeat ?? '');
   const [recurringId, setRecurringId] = useState<number | undefined>();
   const [personId, setPersonId] = useState<number | undefined>(defaults?.personId);
   const [dir, setDir] = useState<DebtDir>(defaults?.dir ?? 'out');
@@ -84,6 +84,8 @@ export function TxEditor({ id, type: initialType, defaults }: { id?: number; typ
   const selected = categoryId != null ? catMap.get(categoryId) : undefined;
   const selectedParent = selected?.parentId != null ? catMap.get(selected.parentId) : undefined;
   const rec = recurringId != null ? recurring.find((r) => r.id === recurringId) : undefined;
+  const subParent = selected ? (selectedParent ?? (categories.some((c) => c.parentId === selected.id) ? selected : undefined)) : undefined;
+  const subs = subParent ? categories.filter((c) => c.parentId === subParent.id) : [];
 
   useEffect(() => {
     if (selected && selected.type !== catType) setCategoryId(undefined);
@@ -99,7 +101,7 @@ export function TxEditor({ id, type: initialType, defaults }: { id?: number; typ
     }
     const ids = [...count.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k);
     const fallback = categories.filter((c) => c.type === catType && c.parentId == null).map((c) => c.id!);
-    return [...new Set([...ids, ...fallback])].slice(0, 6).map((k) => catMap.get(k)).filter(Boolean) as Category[];
+    return [...new Set([...ids, ...fallback])].slice(0, 7).map((k) => catMap.get(k)).filter(Boolean) as Category[];
   }, [txs, catType, categories, catMap]);
 
   // Notas anteriores → sugerencias (y su última categoría)
@@ -126,6 +128,14 @@ export function TxEditor({ id, type: initialType, defaults }: { id?: number; typ
     const hit = noteIndex.get(note.trim().toLowerCase());
     if (hit?.categoryId != null) setCategoryId(hit.categoryId);
   }, [note]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // La elegida siempre se ve en la cuadrícula, aunque no sea de las frecuentes
+  const gridCats = useMemo(() => {
+    const list = [...frequent];
+    const shown = selectedParent ?? selected;
+    if (shown && !list.some((c) => c.id === shown.id || c.id === selected?.id)) list.splice(list.length - 1, 1, shown);
+    return list.slice(0, 7);
+  }, [frequent, selected, selectedParent]);
 
   const cents = evaluate(expr);
   const pending = hasOp(expr);
@@ -198,8 +208,13 @@ export function TxEditor({ id, type: initialType, defaults }: { id?: number; typ
       await processRecurring();
       toast(type === 'expense' ? 'Gasto guardado' : type === 'income' ? 'Ingreso guardado' : type === 'debt' ? 'Préstamo guardado' : 'Transferencia guardada');
     } else {
+      if (repeat && recurringId == null) {
+        const { photo: _p, createdAt: _c, recurringId: _r, date: _d, ...tpl } = tx;
+        tx.recurringId = await db.recurring.add({ ...tpl, frequency: repeat, nextDate: nextOccurrence(date, repeat), active: true });
+      }
       const { createdAt: _c, ...changes } = tx;
       await db.transactions.update(id, { ...changes, photo });
+      await processRecurring();
       toast('Cambios guardados');
     }
     nav.pop();
@@ -251,7 +266,7 @@ export function TxEditor({ id, type: initialType, defaults }: { id?: number; typ
       </div>
 
       <div
-        className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-4 pb-3"
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4"
         onFocus={(e) => (e.target as HTMLElement).tagName === 'INPUT' && (e.target as HTMLInputElement).type === 'text' && setTyping(true)}
         onBlur={() => setTimeout(() => setTyping(false), 120)}
       >
@@ -270,29 +285,41 @@ export function TxEditor({ id, type: initialType, defaults }: { id?: number; typ
           <div className="mt-1 h-5 text-[14px] text-ink3">{pending ? `= ${fmt(cents)}` : ''}</div>
         </motion.div>
 
-        {/* Qué: categoría · carteras · persona */}
+        {/* Categoría: las 7 más usadas a un toque, y «Todas» para el resto */}
         {(type === 'expense' || type === 'income') && (
           <>
-            <Press scale={0.98} onClick={() => setSheet('category')} className={`flex w-full items-center gap-3 rounded-[22px] p-3 text-left transition-colors ${selected ? 'bg-surface' : 'border-[1.5px] border-dashed border-ink/20'}`}>
-              {selected ? <Tile icon={selected.icon} color={selected.color} size={44} active /> : <span className="flex h-11 w-11 items-center justify-center rounded-[15px] bg-ink/[0.06] text-ink2"><CatIcon name="tag" size={22} /></span>}
-              <div className="min-w-0 flex-1">
-                <p className="text-[12px] font-medium text-ink3">Categoría</p>
-                <p className="truncate text-[17px] font-semibold">{selected ? selected.name : 'Elige una categoría'}</p>
-                {selectedParent && <p className="truncate text-[12px] text-ink3">{selectedParent.name}</p>}
-              </div>
-              <ChevronRight size={18} className="text-ink3" />
-            </Press>
-            <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pt-2.5">
-              {frequent.map((c) => {
-                const on = categoryId === c.id;
+            <div className="grid grid-cols-4 gap-x-1 gap-y-2">
+              {gridCats.map((c) => {
+                const on = categoryId === c.id || (c.parentId == null && selected?.parentId === c.id);
                 return (
-                  <Press key={c.id} scale={0.92} onClick={() => setCategoryId(c.id)} className={`flex shrink-0 items-center gap-1.5 rounded-full py-1.5 pl-1.5 pr-3.5 text-[14px] transition-colors ${on ? 'bg-ink text-paper' : 'bg-surface'}`}>
-                    <Tile icon={c.icon} color={c.color} size={26} active={on} />
-                    {c.name}
+                  <Press key={c.id} scale={0.88} onClick={() => setCategoryId(c.id)} className="flex min-w-0 flex-col items-center gap-1 py-0.5">
+                    <motion.span animate={on ? { scale: [1, 1.12, 1] } : { scale: 1 }} transition={{ duration: 0.3 }}>
+                      <Tile icon={c.icon} color={c.color} size={48} active={on} />
+                    </motion.span>
+                    <span className={`w-full truncate text-center text-[11.5px] ${on ? 'font-semibold text-ink' : 'text-ink2'}`}>{c.name}</span>
                   </Press>
                 );
               })}
+              <Press scale={0.88} onClick={() => setSheet('category')} className="flex flex-col items-center gap-1 py-0.5">
+                <span className="flex h-12 w-12 items-center justify-center rounded-[16px] bg-ink/[0.06] text-ink2"><Grid size={22} /></span>
+                <span className="text-[11.5px] text-ink2">Todas</span>
+              </Press>
             </div>
+            <AnimatePresence initial={false}>
+              {subParent && subs.length > 0 && (
+                <motion.div key={subParent.id} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pt-2.5">
+                  {[subParent, ...subs].map((c, i) => {
+                    const on = categoryId === c.id;
+                    return (
+                      <Press key={c.id} scale={0.92} onClick={() => setCategoryId(c.id)} className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[13.5px] transition-colors ${on ? 'text-white' : 'bg-surface text-ink2'}`} style={on ? { background: c.color } : undefined}>
+                        <CatIcon name={c.icon} size={15} />
+                        {i === 0 ? 'General' : c.name}
+                      </Press>
+                    );
+                  })}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </>
         )}
 
@@ -330,29 +357,20 @@ export function TxEditor({ id, type: initialType, defaults }: { id?: number; typ
           </>
         )}
 
-        {/* Detalles */}
+        {/* Detalles: nota primero (es lo que más se usa), luego cuenta, fecha y repetir */}
         <div className="divide-hair mt-4 overflow-hidden rounded-[22px] bg-surface">
-          {type !== 'transfer' && (
-            <Row icon={<WalletIcon size={18} />} label={type === 'debt' ? (dir === 'out' ? 'Sale de' : 'Entra en') : type === 'income' ? 'Entra en' : 'Pagado con'} onClick={() => setSheet('wallet')}>
-              {wallet?.name ?? 'Elegir'}
-            </Row>
-          )}
-          <label className="relative block">
-            <Row icon={<Calendar size={18} />} label="Fecha">{dayLabel(date)}</Row>
-            <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} className="date-overlay absolute inset-0 opacity-0" aria-label="Fecha" />
-          </label>
-          <div className="flex items-center gap-3 px-4 py-1">
+          <div className="flex items-center gap-3 px-4">
             <span className="text-ink3"><Edit size={18} /></span>
             <input
               type="text"
               className="min-w-0 flex-1 bg-transparent py-3 text-[16px] outline-none placeholder:text-ink3"
-              placeholder="Nota (opcional): Mercadona, cena…"
+              placeholder="Nota: Mercadona, cena con Laura…"
               value={note}
               onChange={(e) => { noteTouched.current = true; setNote(e.target.value); }}
               enterKeyHint="done"
               onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
             />
-            {note && <button onClick={() => setNote('')} className="text-ink3" aria-label="Borrar nota"><Close size={16} /></button>}
+            {note && <button onClick={() => setNote('')} className="p-1 text-ink3" aria-label="Borrar nota"><Close size={16} /></button>}
           </div>
           <AnimatePresence>
             {suggestions.length > 0 && (
@@ -369,22 +387,43 @@ export function TxEditor({ id, type: initialType, defaults }: { id?: number; typ
               </motion.div>
             )}
           </AnimatePresence>
+          {type !== 'transfer' && (
+            <Row icon={<WalletIcon size={18} />} label={type === 'debt' ? (dir === 'out' ? 'Sale de' : 'Entra en') : type === 'income' ? 'Entra en' : 'Pagado con'} onClick={() => setSheet('wallet')}>
+              {wallet?.name ?? 'Elegir'}
+            </Row>
+          )}
+          <div className="flex items-center gap-3 px-4 py-2">
+            <span className="text-ink3"><Calendar size={18} /></span>
+            <span className="flex-1 text-[15px] text-ink2">Fecha</span>
+            {[todayISO(), addDays(todayISO(), -1)].map((d, i) => (
+              <Press key={d} scale={0.9} onClick={() => setDate(d)} className={`rounded-full px-3 py-1.5 text-[14px] font-semibold transition-colors ${date === d ? 'bg-ink text-paper' : 'bg-ink/[0.06] text-ink2'}`}>
+                {i === 0 ? 'Hoy' : 'Ayer'}
+              </Press>
+            ))}
+            <label className={`relative rounded-full px-3 py-1.5 text-[14px] font-semibold ${date !== todayISO() && date !== addDays(todayISO(), -1) ? 'bg-ink text-paper' : 'bg-ink/[0.06] text-ink2'}`}>
+              {date !== todayISO() && date !== addDays(todayISO(), -1) ? dayLabel(date).replace(/^[^,]+, /, '') : 'Otra'}
+              <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} className="date-overlay absolute inset-0 opacity-0" aria-label="Elegir fecha" />
+            </label>
+          </div>
+          {type !== 'debt' && (rec ? (
+            <Row icon={<Repeat size={18} />} label="Se repite" onClick={() => nav.push({ name: 'recurring' })}>{rec.active ? FREQ_LABEL[rec.frequency] : 'En pausa'}</Row>
+          ) : (
+            <Row icon={<Repeat size={18} />} label="Repetir" onClick={() => setSheet('repeat')}>
+              <span className={repeat ? 'text-accent' : 'text-ink3'}>{repeat ? FREQ_LABEL[repeat] : 'No se repite'}</span>
+            </Row>
+          ))}
           {photoUrl ? (
             <Row icon={<Camera size={18} />} label="Foto" onClick={() => setViewPhoto(true)}>
               <img src={photoUrl} className="h-8 w-8 rounded-lg object-cover" alt="Foto adjunta" />
             </Row>
           ) : (
             <label className="block">
-              <Row icon={<Camera size={18} />} label="Foto del ticket">Añadir</Row>
+              <Row icon={<Camera size={18} />} label="Foto del ticket"><span className="text-ink3">Añadir</span></Row>
               <input type="file" accept="image/*" className="hidden" onChange={onPhoto} />
             </label>
           )}
-          {rec ? (
-            <Row icon={<Repeat size={18} />} label="Se repite">{rec.active ? FREQ_LABEL[rec.frequency] : 'Detenida'}</Row>
-          ) : isNew && type !== 'debt' ? (
-            <Row icon={<Repeat size={18} />} label="Repetir" onClick={() => setSheet('repeat')}>{repeat ? FREQ_LABEL[repeat] : 'No'}</Row>
-          ) : null}
         </div>
+        {date > todayISO() && <p className="px-1 pt-2 text-[13px] text-ink3">Fecha futura: aparecerá en «Próximos» y no contará hasta ese día.</p>}
 
         {/* Gasto compartido: alguien te debe una parte */}
         {type === 'expense' && isNew && (

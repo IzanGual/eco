@@ -5,7 +5,8 @@ import type { CatType } from '../db';
 import { addDays, daysBetween, fmt, fromISO, getPeriod, monthShort, todayISO, totals, type PeriodKind } from '../lib';
 import { useData } from '../store';
 import { useNav } from '../nav';
-import { BigAmount, Empty, LargeTitle, PrivacyToggle, Press, Segmented, Tile } from '../components/ui';
+import { BigAmount, Empty, LargeTitle, PrivacyToggle, Press, Segmented, Tile, toast } from '../components/ui';
+import { useHousehold } from './Couple';
 
 type Kind = Exclude<PeriodKind, 'day'>;
 
@@ -51,6 +52,38 @@ export function Stats() {
   const maxBar = Math.max(1, ...bars.map((b) => b.value));
   const elapsed = Math.max(1, Math.min(daysBetween(period.start, today), daysBetween(period.start, period.end)) + 1);
   const avg = kind === 'year' ? Math.round(value / Math.max(1, offset === 0 ? new Date().getMonth() + 1 : 12)) : Math.round(value / (offset === 0 ? elapsed : bars.length));
+
+  const house = useHousehold();
+  const byMember = useMemo(() => {
+    if (!house) return [];
+    const m = new Map<string, number>();
+    for (const x of cur) if (x.type === 'expense' && x.by) m.set(x.by, (m.get(x.by) ?? 0) + x.amount);
+    const total = [...m.values()].reduce((a, b) => a + b, 0);
+    return house.members.map((uid) => ({ uid, name: (house.names[uid] || '?').split(' ')[0], v: m.get(uid) ?? 0, pct: total ? (m.get(uid) ?? 0) / total : 0 }));
+  }, [cur, house]);
+
+  // Resumen en texto para pegarlo en ChatGPT, Claude o la IA que uses (en Soldi esto es de pago)
+  async function shareForAI() {
+    const lines = [`Mis finanzas personales (${period.label}). Ingresos: ${fmt(t.income)}. Gastos: ${fmt(t.expense)}. Ahorro: ${fmt(t.net)}.`, '', 'Gastos por categoría:'];
+    const byCat = new Map<string, number>();
+    for (const x of cur) {
+      if (x.type !== 'expense') continue;
+      const c = x.categoryId != null ? catMap.get(x.categoryId) : undefined;
+      const p = c?.parentId != null ? catMap.get(c.parentId) : c;
+      byCat.set(p?.name ?? 'Sin categoría', (byCat.get(p?.name ?? 'Sin categoría') ?? 0) + x.amount);
+    }
+    [...byCat.entries()].sort((a, b) => b[1] - a[1]).forEach(([n, v]) => lines.push(`- ${n}: ${fmt(v)}`));
+    lines.push('', 'Gastos más grandes:');
+    cur.filter((x) => x.type === 'expense').sort((a, b) => b.amount - a.amount).slice(0, 8)
+      .forEach((x) => lines.push(`- ${x.date} · ${x.note || catMap.get(x.categoryId!)?.name || ''}: ${fmt(x.amount)}`));
+    lines.push('', '¿Qué patrones ves y qué me recomiendas para ahorrar más el próximo periodo?');
+    const text = lines.join(String.fromCharCode(10));
+    if (navigator.share) {
+      try { await navigator.share({ text }); return; } catch { /* cancelado */ }
+    }
+    await navigator.clipboard?.writeText(text);
+    toast('Resumen copiado: pégalo en tu IA');
+  }
 
   const slices = useMemo(() => {
     const map = new Map<number | undefined, number>();
@@ -110,6 +143,23 @@ export function Stats() {
             <span className="text-[15px] font-semibold">Ver el resumen {kind === 'week' ? 'de la semana' : 'del mes'}</span>
             <ArrowUpRight size={18} />
           </Press>
+        )}
+        <Press scale={0.98} onClick={shareForAI} className="mt-2 flex w-full items-center justify-between rounded-[20px] bg-surface px-4 py-3.5">
+          <span className="text-[15px] font-semibold">Pedir consejo a una IA</span>
+          <span className="text-[13px] text-ink3">Copia el resumen</span>
+        </Press>
+
+        {/* Pareja: cuánto ha apuntado cada uno */}
+        {house && house.members.length > 1 && byMember.length > 0 && (
+          <div className="mt-3 rounded-[20px] bg-surface p-4">
+            <p className="text-[13px] text-ink3">Gastos apuntados por cada uno</p>
+            <div className="mt-2.5 flex h-2.5 overflow-hidden rounded-full">
+              {byMember.map((m, i) => <div key={m.uid} style={{ width: `${m.pct * 100}%`, background: i === 0 ? 'rgb(var(--ink))' : 'rgb(var(--accent))' }} />)}
+            </div>
+            <div className="mt-2 flex justify-between text-[14px]">
+              {byMember.map((m) => <span key={m.uid}>{m.name} <span className="num text-[17px]">{fmt(m.v, { compact: true })}</span></span>)}
+            </div>
+          </div>
         )}
 
         {/* Barras */}

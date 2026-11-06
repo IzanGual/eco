@@ -4,8 +4,8 @@ import {
   Running, Repeat, Screen, Application, Cut, DogWalker, Portfolio, Star, Money, Currency, Wallet, Finance, Purchase,
   PiggyBank, ChartLine, Undo, Favorite, Receipt, Soccer, Sprout, Package, Tag, Bicycle, Bus, Hotel, Bar, Drink_01,
   HealthCross, Ticket, Theater, Camera, Plug, Basketball, Sun, Umbrella, Construction, Apple, Fish, Strawberry,
-  Swim, Trophy, Tree, UserMultiple, Phone, Calendar, Headphones, Scooter, Clean, Lightning, Key, Globe, Bullhorn,
-  Tennis, ChargingStation, Collaborate, Hospital
+  Swim, Trophy, Tree, UserMultiple, Phone, Calendar, Headphones, Scooter, Clean, Lightning, Globe, Bullhorn,
+  Tennis, ChargingStation, Collaborate, Hospital, Locked
 } from '@carbon/icons-react';
 import type { ComponentType } from 'react';
 
@@ -17,7 +17,7 @@ export const ICONS: Record<string, CarbonIcon> = {
   cart: ShoppingCart, restaurant: Restaurant, cafe: Cafe, delivery: Delivery, bar: Bar, drink: Drink_01, apple: Apple,
   fish: Fish, strawberry: Strawberry,
   // casa
-  home: Home, building: Building, idea: Idea, water: Humidity, wifi: Wifi, lightning: Lightning, key: Key, clean: Clean,
+  home: Home, building: Building, idea: Idea, water: Humidity, wifi: Wifi, lightning: Lightning, key: Locked, clean: Clean,
   construction: Construction, plug: Plug,
   // transporte
   car: Car, gas: GasStation, train: Train, taxi: Taxi, bus: Bus, bicycle: Bicycle, scooter: Scooter, plane: Plane,

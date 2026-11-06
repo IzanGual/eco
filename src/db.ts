@@ -41,6 +41,7 @@ export interface Transaction {
   recurringId?: number;
   personId?: number; // solo préstamos
   dir?: DebtDir; // solo préstamos
+  by?: string; // uid de quien lo apuntó (modo pareja)
   createdAt: number;
 }
 
@@ -118,11 +119,26 @@ class EcoDB extends Dexie {
 
 export const db = new EcoDB();
 
+/** Tablas que se comparten en el modo pareja. */
+export const SYNC_TABLES = ['wallets', 'categories', 'transactions', 'recurring', 'budgets', 'people'] as const;
+export type SyncTable = (typeof SYNC_TABLES)[number];
+
+// IDs aleatorios grandes para que dos móviles no creen el mismo id a la vez (cabe en 53 bits)
+export const newId = () => Math.floor(Date.now() / 1000) * 1_000_000 + Math.floor(Math.random() * 1_000_000);
+for (const t of SYNC_TABLES) {
+  db.table(t).hook('creating', function (primKey, obj: { id?: number }) {
+    if (primKey === undefined && obj.id === undefined) {
+      obj.id = newId();
+      return obj.id;
+    }
+  });
+}
+
 type Seed = [string, string, string, [string, string][]?];
 
 const EXPENSE_SEED: Seed[] = [
   ['Comida', 'cart', '#C99A2E', [['Supermercado', 'cart'], ['Restaurantes', 'restaurant'], ['Cafeterías', 'cafe'], ['A domicilio', 'delivery']]],
-  ['Casa', 'home', '#5A5A9E', [['Alquiler / hipoteca', 'key'], ['Luz', 'idea'], ['Agua', 'water'], ['Internet y móvil', 'wifi'], ['Hogar', 'home']]],
+  ['Casa', 'home', '#5A5A9E', [['Alquiler / hipoteca', 'building'], ['Luz', 'idea'], ['Agua', 'water'], ['Internet y móvil', 'wifi'], ['Hogar', 'home']]],
   ['Transporte', 'car', '#4F6D8F', [['Gasolina', 'gas'], ['Transporte público', 'train'], ['Taxi / VTC', 'taxi'], ['Parking', 'car'], ['Mantenimiento', 'tools']]],
   ['Ocio', 'events', '#C0627A', [['Salir', 'bar'], ['Cine y eventos', 'ticket'], ['Viajes', 'plane'], ['Hobbies', 'game']]],
   ['Compras', 'bag', '#8A4F7D', [['Ropa', 'bag'], ['Electrónica', 'mobile'], ['Regalos', 'gift']]],
