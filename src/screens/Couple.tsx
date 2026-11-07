@@ -128,6 +128,40 @@ export function Couple({ code: initialCode }: { code?: string }) {
           <p className="px-1 pt-2 text-[13px] text-ink3">Al unirte, tus datos actuales se guardan en tu copia de la nube y pasas a ver los del espacio.</p>
         </>
       )}
+      <HowItWorks />
     </Page>
+  );
+}
+
+const FAQ: [string, string][] = [
+  ['¿Qué es el espacio compartido?', 'Una sola libreta de gastos para los dos. Carteras, categorías, movimientos, presupuestos, repeticiones y préstamos son los mismos en ambos móviles.'],
+  ['¿Cómo se empieza?', 'Uno crea el espacio: sus datos actuales pasan a ser los del espacio. Después envía el enlace o el código de 6 letras a su pareja.'],
+  ['¿Qué pasa con los datos de quien se une?', 'Antes de unirse se guardan en su copia personal de la nube, y en su móvil pasa a ver los del espacio. Si algún día sale, puede recuperarlos desde Ajustes → Cuenta.'],
+  ['¿Se actualiza solo?', 'Sí. Lo que apunta uno aparece en el otro móvil en unos segundos. Si no hay conexión, se guarda y se envía al volver la cobertura.'],
+  ['¿Cómo sé quién apuntó cada cosa?', 'Cada movimiento lleva la inicial de quien lo apuntó, y en Análisis ves cuánto ha apuntado cada uno.'],
+  ['¿Y si los dos queremos cosas privadas?', 'Por ahora todo es común. Para lo de cada uno podéis usar carteras distintas (por ejemplo «Banco Izan» y «Banco Laura»).'],
+  ['¿Qué no se comparte?', 'Las fotos de los tickets (se quedan en el móvil de quien las hizo) y los ajustes de cada uno: tema, ojito y día de cobro.'],
+  ['¿Y si salgo?', 'Los datos se quedan en tu móvil como tuyos, pero dejan de sincronizarse. Tu pareja sigue con el espacio.']
+];
+
+function HowItWorks() {
+  const [open, setOpen] = useState<number | null>(null);
+  return (
+    <div className="mt-8">
+      <p className="eyebrow px-1 pb-2">Cómo funciona</p>
+      <div className="divide-hair overflow-hidden rounded-[22px] bg-surface">
+        {FAQ.map(([q, a], i) => (
+          <div key={q}>
+            <Press scale={0.99} onClick={() => setOpen(open === i ? null : i)} className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left">
+              <span className="text-[15px] font-medium">{q}</span>
+              <motion.span animate={{ rotate: open === i ? 45 : 0 }} className="text-[20px] leading-none text-ink3">+</motion.span>
+            </Press>
+            {open === i && (
+              <motion.p initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} className="px-4 pb-4 text-[14px] leading-relaxed text-ink2">{a}</motion.p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

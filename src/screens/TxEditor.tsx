@@ -83,7 +83,7 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
   const selected = categoryId != null ? catMap.get(categoryId) : undefined;
   const selectedParent = selected?.parentId != null ? catMap.get(selected.parentId) : undefined;
   const rec = recurringId != null ? recurring.find((r) => r.id === recurringId) : undefined;
-  const subParent = selected ? (selectedParent ?? (categories.some((c) => c.parentId === selected.id) ? selected : undefined)) : undefined;
+  const subParent = selected ? (selectedParent ?? selected) : undefined;
   const subs = subParent ? categories.filter((c) => c.parentId === subParent.id) : [];
 
   useEffect(() => {
@@ -139,6 +139,17 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
       .filter((c) => c.type === catType && c.parentId == null)
       .sort((a, b) => (score.get(b.id!) ?? 0) - (score.get(a.id!) ?? 0) || a.order - b.order);
   }, [categories, catType, frequent]);
+
+  // Las 3 carteras que más usas (la elegida siempre visible)
+  const quickWallets = useMemo(() => {
+    const count = new Map<number, number>();
+    for (const t of txs.slice(0, 400)) count.set(t.walletId, (count.get(t.walletId) ?? 0) + 1);
+    const sorted = [...wallets].sort((a, b) => (count.get(b.id!) ?? 0) - (count.get(a.id!) ?? 0) || a.order - b.order);
+    const top = sorted.slice(0, 3);
+    const cur = wallets.find((w) => w.id === walletId);
+    if (cur && !top.includes(cur)) top[top.length - 1] = cur;
+    return top;
+  }, [txs, wallets, walletId]);
 
   const cents = evaluate(expr);
   const share = shareOn ? (shareExpr === 'half' ? Math.round(cents / 2) : parseAmount(shareExpr)) : 0;
@@ -295,21 +306,7 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
                 <span className="text-[12px] text-ink3">Nueva</span>
               </Press>
             </div>
-            <AnimatePresence initial={false}>
-              {subParent && subs.length > 0 && (
-                <motion.div key={subParent.id} initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pt-2.5">
-                  {[subParent, ...subs].map((c, i) => {
-                    const on = categoryId === c.id;
-                    return (
-                      <Press key={c.id} scale={0.92} onClick={() => setCategoryId(c.id)} className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[13.5px] transition-colors ${on ? 'text-white' : 'bg-surface text-ink2'}`} style={on ? { background: c.color } : undefined}>
-                        <CatIcon name={c.icon} size={15} />
-                        {i === 0 ? 'General' : c.name}
-                      </Press>
-                    );
-                  })}
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {subParent && <SubcategoryBar key={subParent.id} parent={subParent} subs={subs} value={categoryId} onPick={setCategoryId} />}
           </>
         )}
 
@@ -378,9 +375,21 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
             )}
           </AnimatePresence>
           {type !== 'transfer' && (
-            <Row icon={<WalletIcon size={18} />} label={type === 'debt' ? (dir === 'out' ? 'Sale de' : 'Entra en') : type === 'income' ? 'Entra en' : 'Pagado con'} onClick={() => setSheet('wallet')}>
-              {wallet?.name ?? 'Elegir'}
-            </Row>
+            <div className="flex items-center gap-3 py-2 pl-4">
+              <span className="text-ink3"><WalletIcon size={18} /></span>
+              <span className="shrink-0 text-[15px] text-ink2">{type === 'debt' ? (dir === 'out' ? 'Sale de' : 'Entra en') : type === 'income' ? 'Entra en' : 'Pagado con'}</span>
+              <div className="no-scrollbar flex min-w-0 flex-1 gap-1.5 overflow-x-auto pr-4">
+                {quickWallets.map((w) => (
+                  <Press key={w.id} scale={0.9} onClick={() => setWalletId(w.id)} className={`flex shrink-0 items-center gap-1.5 rounded-full py-1.5 pl-1.5 pr-3 text-[14px] font-semibold transition-colors ${walletId === w.id ? 'bg-ink text-paper' : 'bg-ink/[0.06] text-ink2'}`}>
+                    <Tile icon={w.icon} color={w.color} size={22} active={walletId === w.id} />
+                    {w.name}
+                  </Press>
+                ))}
+                {wallets.length > quickWallets.length && (
+                  <Press scale={0.9} onClick={() => setSheet('wallet')} className="shrink-0 rounded-full bg-ink/[0.06] px-3 py-1.5 text-[14px] font-semibold text-ink2">Más</Press>
+                )}
+              </div>
+            </div>
           )}
           <div className="flex items-center gap-3 px-4 py-2">
             <span className="text-ink3"><Calendar size={18} /></span>
@@ -657,5 +666,67 @@ function OptionRow({ children, icon, selected, onClick }: { children: ReactNode;
       <span className="flex-1 text-[16px]">{children}</span>
       {selected && <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={spring} className="text-accent"><Checkmark size={20} /></motion.span>}
     </Press>
+  );
+}
+
+/** Subcategorías de la categoría elegida: elegir, crear y borrar sin salir del formulario. */
+function SubcategoryBar({ parent, subs, value, onPick }: { parent: Category; subs: Category[]; value?: number; onPick: (id: number) => void }) {
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState('');
+
+  async function create() {
+    const n = name.trim();
+    if (!n) return setAdding(false);
+    const id = await db.categories.add({ name: n, icon: parent.icon, color: parent.color, type: parent.type, parentId: parent.id!, order: subs.length });
+    setName('');
+    setAdding(false);
+    onPick(id);
+    toast(`«${n}» creada`);
+  }
+
+  async function remove(c: Category) {
+    const n = await db.transactions.where('categoryId').equals(c.id!).count();
+    if (!(await confirmDialog(`¿Borrar «${c.name}»?`, { message: n ? `Sus ${n} movimiento${n > 1 ? 's' : ''} pasarán a «${parent.name}».` : undefined, confirm: 'Borrar' }))) return;
+    await db.transaction('rw', db.categories, db.transactions, db.budgets, async () => {
+      await db.transactions.where('categoryId').equals(c.id!).modify({ categoryId: parent.id });
+      await db.categories.delete(c.id!);
+      await db.budgets.toCollection().modify((b) => { b.categoryIds = b.categoryIds.filter((x) => x !== c.id); });
+    });
+    if (value === c.id) onPick(parent.id!);
+    if (subs.length <= 1) setEditing(false);
+  }
+
+  const chip = 'flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-[13.5px] transition-colors';
+  return (
+    <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="no-scrollbar -mx-4 flex items-center gap-2 overflow-x-auto px-4 pt-3">
+      {[parent, ...subs].map((c, i) => {
+        const on = value === c.id;
+        return (
+          <motion.div key={c.id} layout className="relative shrink-0">
+            <Press scale={0.92} onClick={() => (editing && i > 0 ? remove(c) : onPick(c.id!))} className={`${chip} ${on && !editing ? 'text-white' : 'bg-surface text-ink2'} ${editing && i > 0 ? 'pr-2 ring-1 ring-accent/40' : ''}`} style={on && !editing ? { background: c.color } : undefined}>
+              <CatIcon name={c.icon} size={15} />
+              {i === 0 ? 'General' : c.name}
+              {editing && i > 0 && <span className="ml-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-accent text-white"><Close size={12} /></span>}
+            </Press>
+          </motion.div>
+        );
+      })}
+      {adding ? (
+        <form onSubmit={(e) => { e.preventDefault(); create(); }} className="flex shrink-0 items-center gap-1 rounded-full bg-surface py-1 pl-3 pr-1 ring-1 ring-ink/15">
+          <input autoFocus type="text" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => !name.trim() && setAdding(false)} placeholder={`Nueva en ${parent.name}`} enterKeyHint="done" className="w-36 bg-transparent text-[14px] outline-none placeholder:text-ink3" />
+          <button type="submit" className="flex h-7 w-7 items-center justify-center rounded-full bg-ink text-paper" aria-label="Crear"><Checkmark size={16} /></button>
+        </form>
+      ) : !editing && (
+        <Press scale={0.92} onClick={() => setAdding(true)} className={`${chip} border border-dashed border-ink/25 text-ink2`}>
+          <Add size={15} /> Subcategoría
+        </Press>
+      )}
+      {subs.length > 0 && !adding && (
+        <Press scale={0.92} onClick={() => setEditing((v) => !v)} className={`${chip} font-semibold ${editing ? 'bg-ink text-paper' : 'text-ink3'}`}>
+          {editing ? 'Listo' : 'Editar'}
+        </Press>
+      )}
+    </motion.div>
   );
 }
