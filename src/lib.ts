@@ -1,4 +1,6 @@
 import { db, type Frequency, type Transaction, type Category, type Wallet } from './db';
+import { getHousehold } from './sync';
+import { currentUser } from './cloud';
 
 // ---------- Dinero ----------
 let currency = 'EUR';
@@ -156,7 +158,14 @@ export async function processRecurring() {
   processing = true;
   try {
     const today = todayISO();
-    const due = await db.recurring.where('nextDate').belowOrEqual(today).filter((r) => r.active).toArray();
+    // En pareja, cada repetición la genera solo el móvil de quien la creó (si no, saldrían duplicadas)
+    const house = getHousehold();
+    const me = currentUser()?.uid;
+    const due = await db.recurring
+      .where('nextDate')
+      .belowOrEqual(today)
+      .filter((r) => r.active && (!house || !r.by || r.by === me))
+      .toArray();
     for (const r of due) {
       await db.transaction('rw', db.recurring, db.transactions, async () => {
         let next = r.nextDate;
@@ -171,6 +180,8 @@ export async function processRecurring() {
             date: next,
             note: r.note,
             recurringId: r.id,
+            private: r.private,
+            by: r.by,
             createdAt: Date.now()
           });
           next = nextOccurrence(next, r.frequency);

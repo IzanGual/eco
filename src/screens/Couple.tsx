@@ -139,8 +139,9 @@ const FAQ: [string, string][] = [
   ['¿Qué pasa con los datos de quien se une?', 'Antes de unirse se guardan en su copia personal de la nube, y en su móvil pasa a ver los del espacio. Si algún día sale, puede recuperarlos desde Ajustes → Cuenta.'],
   ['¿Se actualiza solo?', 'Sí. Lo que apunta uno aparece en el otro móvil en unos segundos. Si no hay conexión, se guarda y se envía al volver la cobertura.'],
   ['¿Cómo sé quién apuntó cada cosa?', 'Cada movimiento lleva la inicial de quien lo apuntó, y en Análisis ves cuánto ha apuntado cada uno.'],
-  ['¿Y si los dos queremos cosas privadas?', 'Por ahora todo es común. Para lo de cada uno podéis usar carteras distintas (por ejemplo «Banco Izan» y «Banco Laura»).'],
-  ['¿Qué no se comparte?', 'Las fotos de los tickets (se quedan en el móvil de quien las hizo) y los ajustes de cada uno: tema, ojito y día de cobro.'],
+  ['¿Puedo apuntar algo que no vea mi pareja?', 'Sí. Al apuntar, activa «Solo para mí» y ese movimiento no sale de tu móvil (ni aparece en el suyo). Va con un candado.'],
+  ['¿Y tener mi dinero aparte?', 'Crea una cartera y en sus ajustes activa «Solo para mí». Tu pareja no la verá, ni a ella ni nada de lo que pagues con ella. Ideal para regalos sorpresa: si pagas algo privado con una cartera común, su saldo no le cuadrará con el tuyo.'],
+  ['¿Qué no se comparte?', 'Lo marcado «Solo para mí», las carteras privadas, las fotos de los tickets (se quedan en el móvil de quien las hizo) y los ajustes de cada uno: tema, ojito y día de cobro.'],
   ['¿Y si salgo?', 'Los datos se quedan en tu móvil como tuyos, pero dejan de sincronizarse. Tu pareja sigue con el espacio.']
 ];
 

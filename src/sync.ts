@@ -59,7 +59,7 @@ for (const t of SYNC_TABLES) {
   const table = db.table(t);
   table.hook('creating', function (primKey, obj: { id?: number; by?: string }, tx) {
     if ((tx as unknown as MaybeRemote).remote) return;
-    if (t === 'transactions' && house && !obj.by) obj.by = currentUser()?.uid;
+    if ((t === 'transactions' || t === 'recurring') && house && !obj.by) obj.by = currentUser()?.uid;
     // El id se asigna en el gancho de db.ts; lo recogemos cuando termine
     this.onsuccess = (key) => enqueue(t, key ?? primKey ?? obj.id);
   });
@@ -69,6 +69,16 @@ for (const t of SYNC_TABLES) {
   table.hook('deleting', function (primKey, _obj, tx) {
     if (!(tx as unknown as MaybeRemote).remote) enqueue(t, primKey);
   });
+}
+
+/** ¿Este registro es solo mío? (marcado «Solo para mí» o de una cartera privada) */
+async function isPrivate(t: SyncTable, rec: Record<string, unknown>) {
+  if (rec.private) return true;
+  if (t === 'transactions' || t === 'recurring') {
+    const ids = [rec.walletId, rec.toWalletId].filter((x) => x != null) as number[];
+    for (const id of ids) if ((await db.wallets.get(id))?.private) return true;
+  }
+  return false;
 }
 
 function serialize(rec: Record<string, unknown>) {
@@ -88,7 +98,8 @@ export async function flush() {
     const id = Number(rawId);
     const rec = await db.table(t).get(id);
     const ref = doc(fs, 'households', house.id, 'docs', `${t}_${id}`);
-    if (rec) batch.set(ref, { t, id, d: serialize(rec), u: serverTimestamp(), by: currentUser()!.uid });
+    if (rec && (await isPrivate(t, rec))) batch.set(ref, { t, id, del: true, u: serverTimestamp(), by: currentUser()!.uid });
+    else if (rec) batch.set(ref, { t, id, d: serialize(rec), u: serverTimestamp(), by: currentUser()!.uid });
     else batch.set(ref, { t, id, del: true, u: serverTimestamp(), by: currentUser()!.uid });
   }
   await batch.commit();
@@ -101,7 +112,10 @@ export async function flush() {
 async function uploadAll() {
   for (const t of SYNC_TABLES) {
     const keys = await db.table(t).toCollection().primaryKeys();
-    keys.forEach((k) => outbox.add(`${t}:${k}`));
+    for (const k of keys) {
+      const rec = await db.table(t).get(k);
+      if (rec && !(await isPrivate(t, rec))) outbox.add(`${t}:${k}`);
+    }
   }
   saveOutbox();
   await flush();
@@ -145,6 +159,8 @@ async function listen() {
         // Si aquí hay un cambio sin subir de ese mismo registro, gana el local
         if (outbox.has(`${v.t}:${v.id}`)) continue;
         const table = db.table(v.t);
+        const local = (await table.get(v.id)) as { private?: boolean; walletId?: number } | undefined;
+        if (local && (await isPrivate(v.t, local as Record<string, unknown>))) continue;
         if (v.del) await table.delete(v.id);
         else if (v.d) {
           const rec = JSON.parse(v.d);
@@ -185,6 +201,7 @@ export async function createHousehold(name = 'Nuestra casa') {
   await b.commit();
   // Marcamos los movimientos existentes como apuntados por mí
   await db.transactions.toCollection().modify((t) => { if (!t.by) t.by = me.uid; });
+  await db.recurring.toCollection().modify((r) => { if (!r.by) r.by = me.uid; });
   setHouse({ id: ref.id, ...data });
   localStorage.setItem(LS_PULL, String(Date.now()));
   await uploadAll();
@@ -257,4 +274,9 @@ export function initSync() {
   });
   window.addEventListener('online', () => flush().catch(() => {}));
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && flush().catch(() => {}));
+}
+
+/** Vuelve a enviar unos registros (por ejemplo, al hacer privada o compartida una cartera entera). */
+export function resend(t: SyncTable, ids: number[]) {
+  ids.forEach((id) => enqueue(t, id));
 }

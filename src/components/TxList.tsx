@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { animate, motion, useMotionValue, useTransform, type PanInfo } from 'framer-motion';
-import { ArrowsHorizontal, Image as ImageIcon, Repeat, TrashCan } from '@carbon/icons-react';
+import { ArrowsHorizontal, Image as ImageIcon, Locked, Repeat, TrashCan } from '@carbon/icons-react';
 import { db, type Transaction } from '../db';
 import { dayLabel, fmt } from '../lib';
 import { useData } from '../store';
@@ -82,6 +82,7 @@ export function TxRow({ t, showDate }: { t: Transaction; showDate?: boolean }) {
             <span className="truncate text-[15px] font-medium">{title}</span>
             {t.recurringId != null && <Repeat size={14} className="shrink-0 text-ink3" />}
             {t.photo && <ImageIcon size={14} className="shrink-0 text-ink3" />}
+            {house && (t.private || wallet?.private) && <Locked size={13} className="shrink-0 text-accent" aria-label="Solo para mí" />}
             {t.by && house && house.members.length > 1 && (
               <span title={`Apuntado por ${memberName(t.by)}`} className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-ink/10 px-1 text-[10px] font-bold text-ink2">{memberName(t.by)?.[0]}</span>
             )}

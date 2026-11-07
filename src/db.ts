@@ -16,6 +16,7 @@ export interface Wallet {
   initialBalance: number; // céntimos
   order: number;
   archived?: boolean;
+  private?: boolean; // cartera solo mía: no se comparte, ni ella ni sus movimientos
 }
 
 export interface Category {
@@ -42,6 +43,7 @@ export interface Transaction {
   personId?: number; // solo préstamos
   dir?: DebtDir; // solo préstamos
   by?: string; // uid de quien lo apuntó (modo pareja)
+  private?: boolean; // «Solo para mí»: no se comparte con la pareja
   createdAt: number;
 }
 
@@ -63,6 +65,8 @@ export interface Recurring {
   frequency: Frequency;
   nextDate: string; // próxima fecha pendiente de generar
   active: boolean;
+  private?: boolean;
+  by?: string; // en pareja: quién la creó (solo su móvil genera los movimientos)
 }
 
 export interface Budget {

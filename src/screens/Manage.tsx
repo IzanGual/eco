@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Add, ChevronDown, ChevronRight, ChevronUp, TrashCan } from '@carbon/icons-react';
+import { Add, ChevronDown, ChevronRight, ChevronUp, Locked, TrashCan } from '@carbon/icons-react';
 import { db, type CatType } from '../db';
 import { centsToInput, fmt, FREQ_LABEL, nextOccurrence, parseAmount, shortDate, todayISO, walletBalances } from '../lib';
 import { useData } from '../store';
 import { useNav } from '../nav';
+import { useHousehold } from '../useHousehold';
+import { resend } from '../sync';
 import { CatIcon } from '../icons';
 import { ColorPicker, Empty, GlassIconButton, Group, IconPicker, Page, Press, Segmented, Tile, confirmDialog, toast } from '../components/ui';
 
@@ -36,7 +38,7 @@ export function Wallets() {
           <motion.div layout key={w.id} className="flex items-center">
             <Press scale={0.98} className="flex flex-1 items-center gap-3.5 px-4 py-3.5 text-left" onClick={() => nav.push({ name: 'walletEdit', id: w.id })}>
               <Tile icon={w.icon} color={w.color} />
-              <span className="flex-1 text-[16px] font-medium">{w.name}</span>
+              <span className="flex flex-1 items-center gap-1.5 text-[16px] font-medium">{w.name}{w.private && <Locked size={14} className="text-accent" />}</span>
               <span className="num text-[20px]">{fmt(balances.get(w.id!) ?? 0)}</span>
             </Press>
             <div className="flex flex-col pr-2 text-ink3">
@@ -74,12 +76,21 @@ export function WalletEdit({ id }: { id?: number }) {
   const [initial, setInitial] = useState(w ? centsToInput(Math.abs(w.initialBalance)) : '');
   const [negative, setNegative] = useState((w?.initialBalance ?? 0) < 0);
   const [moveTo, setMoveTo] = useState<number | ''>('');
+  const [priv, setPriv] = useState(!!w?.private);
+  const house = useHousehold();
   const others = allWallets.filter((x) => x.id !== id && !x.archived);
   const used = id != null && txs.some((t) => t.walletId === id || t.toWalletId === id);
 
   async function save() {
-    const data = { name: name.trim(), icon, color, initialBalance: parseAmount(initial) * (negative ? -1 : 1) };
-    if (w) await db.wallets.update(w.id!, data);
+    const data = { name: name.trim(), icon, color, initialBalance: parseAmount(initial) * (negative ? -1 : 1), private: priv || undefined };
+    if (w) {
+      await db.wallets.update(w.id!, data);
+      // Si cambia la privacidad, sus movimientos se retiran (o se vuelven a enviar) al espacio compartido
+      if (!!w.private !== priv) {
+        resend('transactions', txs.filter((t) => t.walletId === w.id || t.toWalletId === w.id).map((t) => t.id!));
+        resend('recurring', (await db.recurring.toArray()).filter((r) => r.walletId === w.id || r.toWalletId === w.id).map((r) => r.id!));
+      }
+    }
     else await db.wallets.add({ ...data, order: Math.max(-1, ...allWallets.map((x) => x.order)) + 1 });
     toast('Cartera guardada');
     nav.pop();
@@ -111,6 +122,19 @@ export function WalletEdit({ id }: { id?: number }) {
       </div>
       <p className="eyebrow px-1 pb-2">Nombre</p>
       <input className="field" placeholder="Cuenta ahorro" value={name} onChange={(e) => setName(e.target.value)} />
+      {house && house.members.length > 1 && (
+        <Press scale={0.99} onClick={() => setPriv((v) => !v)} className="mt-3 flex w-full items-center gap-3 rounded-[22px] bg-surface px-4 py-3.5 text-left">
+          <span className={priv ? 'text-accent' : 'text-ink3'}><Locked size={18} /></span>
+          <span className="flex-1">
+            <span className="block text-[15px] font-medium">Solo para mí</span>
+            <span className="block text-[12px] text-ink3">{priv ? 'Tu pareja no verá esta cartera ni nada de lo que pagues con ella' : 'Tu pareja ve esta cartera y sus movimientos'}</span>
+          </span>
+          <span className={`flex h-[28px] w-[46px] items-center rounded-full p-[3px] transition-colors ${priv ? 'bg-accent' : 'bg-ink/15'}`}>
+            <motion.span layout className={`h-[22px] w-[22px] rounded-full bg-white shadow ${priv ? 'ml-auto' : ''}`} />
+          </span>
+        </Press>
+      )}
+
       <p className="eyebrow px-1 pb-2 pt-6">Saldo antes de empezar a apuntar</p>
       <div className="flex gap-2">
         <Press scale={0.9} className="btn-soft w-14 px-0 text-[20px]" onClick={() => setNegative((v) => !v)}>{negative ? '−' : '+'}</Press>
