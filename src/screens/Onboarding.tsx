@@ -279,7 +279,7 @@ const TOUR: { icon: ReactNode; title: string; text: string; demo: ReactNode }[] 
     demo: (
       <div className="flex h-24 items-end gap-2 rounded-[20px] bg-ink p-4">
         {[30, 60, 25, 90, 45, 10, 35].map((h, i) => (
-          <motion.div key={i} className={`flex-1 rounded-[4px] ${i === 3 ? 'bg-accent' : 'bg-paper/30'}`} initial={{ height: 0 }} animate={{ height: `${h}%` }} transition={{ delay: 0.2 + i * 0.06, type: 'spring', stiffness: 180, damping: 16 }} />
+          <motion.div key={i} className={`flex-1 rounded-[4px] ${i === 3 ? 'bg-accent' : 'bg-paper/30'}`} style={{ height: `${h}%`, transformOrigin: 'bottom' }} initial={{ scaleY: 0 }} animate={{ scaleY: 1 }} transition={{ delay: 0.2 + i * 0.06, type: 'spring', stiffness: 180, damping: 16 }} />
         ))}
       </div>
     )

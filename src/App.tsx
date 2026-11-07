@@ -1,24 +1,32 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Home as HomeIcon, ListBoxes, ChartPie, Settings as SettingsIcon, Add } from '@carbon/icons-react';
 import { NavCtx, type Nav, type Screen } from './nav';
 import { parseAmount, processRecurring } from './lib';
-import { OverlayHost, Press, spring } from './components/ui';
+import { OverlayHost, Press, focusKeyboard, spring } from './components/ui';
 import { Home } from './screens/Home';
 import { Transactions, Filtered } from './screens/Transactions';
-import { Stats } from './screens/Stats';
 import { Settings } from './screens/Settings';
 import { TxEditor } from './screens/TxEditor';
 import { Budgets, BudgetEdit } from './screens/Budgets';
-import { Wallets, WalletEdit, Categories, CategoryEdit, RecurringList } from './screens/Manage';
-import { Summary } from './screens/Summary';
-import { Landing, isStandalone, shouldShowLanding } from './screens/Landing';
-import { Onboarding } from './screens/Onboarding';
 import { useData } from './store';
+import { isStandalone, shouldShowLanding } from './install';
+
+// Lo que no hace falta para abrir la app se descarga solo cuando se usa
+const Stats = lazy(() => import('./screens/Stats').then((m) => ({ default: m.Stats })));
+const Summary = lazy(() => import('./screens/Summary').then((m) => ({ default: m.Summary })));
+const Landing = lazy(() => import('./screens/Landing').then((m) => ({ default: m.Landing })));
+const Onboarding = lazy(() => import('./screens/Onboarding').then((m) => ({ default: m.Onboarding })));
+const People = lazy(() => import('./screens/People').then((m) => ({ default: m.People })));
+const PersonDetail = lazy(() => import('./screens/People').then((m) => ({ default: m.PersonDetail })));
+const ImportCSV = lazy(() => import('./screens/Import').then((m) => ({ default: m.ImportCSV })));
+const Couple = lazy(() => import('./screens/Couple').then((m) => ({ default: m.Couple })));
+const Wallets = lazy(() => import('./screens/Manage').then((m) => ({ default: m.Wallets })));
+const WalletEdit = lazy(() => import('./screens/Manage').then((m) => ({ default: m.WalletEdit })));
+const Categories = lazy(() => import('./screens/Manage').then((m) => ({ default: m.Categories })));
+const CategoryEdit = lazy(() => import('./screens/Manage').then((m) => ({ default: m.CategoryEdit })));
+const RecurringList = lazy(() => import('./screens/Manage').then((m) => ({ default: m.RecurringList })));
 import { useRef } from 'react';
-import { People, PersonDetail } from './screens/People';
-import { ImportCSV } from './screens/Import';
-import { Couple } from './screens/Couple';
 import type { TxType } from './db';
 
 type Tab = 'home' | 'txs' | 'stats' | 'settings';
@@ -105,8 +113,8 @@ export default function App() {
     if (code && settings.onboarded && !landing) nav.push({ name: 'couple', code });
   }, [settings.onboarded, landing]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (landing) return <Landing onContinue={() => setLanding(false)} />;
-  if (!settings.onboarded) return <Onboarding />;
+  if (landing) return <Suspense fallback={<div className="min-h-dvh bg-paper" />}><Landing onContinue={() => setLanding(false)} /></Suspense>;
+  if (!settings.onboarded) return <Suspense fallback={<div className="min-h-dvh bg-paper" />}><Onboarding /></Suspense>;
 
   return (
     <NavCtx.Provider value={nav}>
@@ -121,7 +129,7 @@ export default function App() {
         >
           {tab === 'home' && <Home />}
           {tab === 'txs' && <Transactions />}
-          {tab === 'stats' && <Stats />}
+          {tab === 'stats' && <Suspense fallback={null}><Stats /></Suspense>}
           {tab === 'settings' && <Settings />}
         </motion.main>
       </AnimatePresence>
@@ -136,12 +144,12 @@ export default function App() {
         </motion.div>
       )}
 
-      <TabBar tab={tab} onTab={selectTab} onAdd={() => nav.push({ name: 'editor' })} />
+      <TabBar tab={tab} onTab={selectTab} onAdd={() => { focusKeyboard(); nav.push({ name: 'editor' }); }} />
 
       <AnimatePresence>
         {stack.map((s, i) => (
           <div key={s.key} className="fixed inset-0" style={{ zIndex: 40 + i }}>
-            <ScreenView s={s} />
+            <Suspense fallback={null}><ScreenView s={s} /></Suspense>
           </div>
         ))}
       </AnimatePresence>

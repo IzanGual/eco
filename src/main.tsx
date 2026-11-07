@@ -12,7 +12,10 @@ import './index.css';
 
 registerSW({ immediate: true });
 initSync();
-initCloud().catch(() => {});
+// Firebase pesa: lo cargamos cuando la app ya se ve
+const idle = (window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback ?? ((cb: () => void) => setTimeout(cb, 600));
+idle(() => initCloud().catch(() => {}), { timeout: 1500 });
+import './install';
 
 // Pide al navegador que no borre los datos aunque falte espacio
 navigator.storage?.persist?.().catch(() => {});

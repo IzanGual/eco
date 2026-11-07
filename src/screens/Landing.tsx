@@ -4,37 +4,8 @@ import { Add, ChartPie, Checkmark, Copy, Download, Launch, UserMultiple, View } 
 import { Logo, Press, Sheet, spring } from '../components/ui';
 import { cloudEnabled, onUser, signInWithGoogle, type CloudUser } from '../cloud';
 
-// ---------- Detección de plataforma ----------
-type BIPEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }> };
-let deferred: BIPEvent | null = null;
-const listeners = new Set<() => void>();
-if (typeof window !== 'undefined') {
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferred = e as BIPEvent;
-    listeners.forEach((l) => l());
-  });
-}
-
-export function isStandalone() {
-  return window.matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
-}
-
-function platform() {
-  const ua = navigator.userAgent;
-  const ios = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  const android = /Android/.test(ua);
-  // Navegadores dentro de otras apps (Instagram, WhatsApp, Gmail…) no dejan instalar
-  const inApp = /Instagram|FBAN|FBAV|Line\/|WhatsApp|GSA\/|Snapchat|TikTok|wv\)/.test(ua);
-  return { ios, android, inApp, mobile: ios || android };
-}
-
-// «Usar en el navegador» solo vale para esta visita: la próxima vez vuelve a salir la landing
-const SKIP = 'eco:skipLanding';
-export const shouldShowLanding = () => {
-  if (isStandalone()) return false;
-  try { return sessionStorage.getItem(SKIP) !== '1'; } catch { return true; }
-};
+import { installListeners, installState, isStandalone, platform, SKIP } from '../install';
+export { isStandalone };
 
 const FEATURES = [
   { icon: Add, title: 'Apunta en tres segundos', text: 'Teclado propio, categorías frecuentes y notas que se autocompletan.' },
@@ -54,22 +25,22 @@ export function Landing({ onContinue }: { onContinue: () => void }) {
 
   async function google() {
     setBusy(true);
-    try { await signInWithGoogle(); } catch (e) { alert((e as Error).message); } finally { setBusy(false); }
+    try { await signInWithGoogle(); setTimeout(() => install(), 400); } catch (e) { alert((e as Error).message); } finally { setBusy(false); }
   }
 
   useEffect(() => {
     const l = () => force((n) => n + 1);
-    listeners.add(l);
+    installListeners.add(l);
     const onInstalled = () => setInstalled(true);
     window.addEventListener('appinstalled', onInstalled);
-    return () => { listeners.delete(l); window.removeEventListener('appinstalled', onInstalled); };
+    return () => { installListeners.delete(l); window.removeEventListener('appinstalled', onInstalled); };
   }, []);
 
   async function install() {
-    if (deferred) {
-      await deferred.prompt();
-      const { outcome } = await deferred.userChoice;
-      deferred = null;
+    if (installState.deferred) {
+      await installState.deferred.prompt();
+      const { outcome } = await installState.deferred.userChoice;
+      installState.deferred = null;
       if (outcome === 'accepted') setInstalled(true);
       force((n) => n + 1);
       return;
@@ -114,7 +85,7 @@ export function Landing({ onContinue }: { onContinue: () => void }) {
           <div className="mt-4 flex h-16 items-end gap-2">
             {[40, 75, 20, 95, 55, 0, 30].map((h, i) => (
               <div key={i} className="flex h-full flex-1 flex-col justify-end">
-                <motion.div className={`rounded-[5px] ${i === 3 ? 'bg-accent' : 'bg-paper/30'}`} initial={{ height: 0 }} animate={{ height: `${Math.max(5, h)}%` }} transition={{ delay: 0.6 + i * 0.07, type: 'spring', stiffness: 180, damping: 18 }} />
+                <motion.div className={`rounded-[5px] ${i === 3 ? 'bg-accent' : 'bg-paper/30'}`} style={{ height: `${Math.max(5, h)}%`, transformOrigin: 'bottom' }} initial={{ scaleY: 0 }} animate={{ scaleY: 1 }} transition={{ delay: 0.6 + i * 0.07, type: 'spring', stiffness: 180, damping: 18 }} />
               </div>
             ))}
           </div>
@@ -180,7 +151,7 @@ export function Landing({ onContinue }: { onContinue: () => void }) {
         </div>
       </div>
 
-      <AnimatePresence>{guide && <InstallGuide key="g" ios={p.ios} onClose={() => setGuide(false)} />}</AnimatePresence>
+      <AnimatePresence>{guide && <InstallGuide key="g" p={p} onClose={() => setGuide(false)} />}</AnimatePresence>
     </div>
   );
 }
@@ -199,41 +170,66 @@ function InAppNotice() {
 }
 
 /** Guía animada: en iPhone no hay botón de instalar, así que señalamos el de Compartir. */
-function InstallGuide({ ios, onClose }: { ios: boolean; onClose: () => void }) {
-  const steps = ios
+/** Guía animada: en iPhone no hay botón de instalar, así que señalamos dónde tocar según el navegador. */
+function InstallGuide({ p, onClose }: { p: ReturnType<typeof platform>; onClose: () => void }) {
+  const box = (c: React.ReactNode) => <span className="flex h-8 min-w-8 items-center justify-center rounded-[9px] border-[1.5px] border-current px-1 text-[13px] font-bold">{c}</span>;
+  const add = { title: 'Añadir a pantalla de inicio', text: 'Si no la ves, baja en el menú o toca «Ver más».', icon: box(<Add size={18} />) };
+  const done = { title: 'Pulsa «Añadir»', text: 'Arriba a la derecha. Eco aparecerá con su icono, como una app más.', icon: <Logo size={32} /> };
+  // Dónde está el botón: Safari 26+ lo esconde en «···» (abajo a la derecha); Chrome en iPhone, arriba a la derecha
+  const where: 'bottom-right' | 'bottom' | 'top-right' = !p.ios ? 'top-right' : p.crios ? 'top-right' : p.safariVersion >= 26 ? 'bottom-right' : 'bottom';
+  const steps = !p.ios
     ? [
-        { n: 1, title: 'Toca Compartir', text: 'El cuadrado con la flecha hacia arriba, en la barra de Safari.', icon: <ShareGlyph /> },
-        { n: 2, title: 'Añadir a pantalla de inicio', text: 'Desliza hacia abajo en el menú si no la ves.', icon: <span className="flex h-8 w-8 items-center justify-center rounded-[9px] border-[1.5px] border-current"><Add size={18} /></span> },
-        { n: 3, title: 'Pulsa «Añadir»', text: 'Arriba a la derecha. Eco aparecerá con su icono, como una app más.', icon: <Logo size={32} /> }
+        { title: 'Abre el menú del navegador', text: 'Los tres puntos, arriba a la derecha.', icon: <span className="text-[22px] font-bold leading-none">⋮</span> },
+        { title: 'Instalar aplicación', text: 'O «Añadir a pantalla de inicio».', icon: <Launch size={22} /> },
+        { title: 'Confirma', text: 'Eco aparecerá con su icono, como una app más.', icon: <Logo size={32} /> }
       ]
-    : [
-        { n: 1, title: 'Abre el menú del navegador', text: 'Los tres puntos, arriba a la derecha.', icon: <span className="text-[22px] font-bold leading-none">⋮</span> },
-        { n: 2, title: 'Instalar aplicación', text: 'O «Añadir a pantalla de inicio».', icon: <Launch size={22} /> },
-        { n: 3, title: 'Confirma', text: 'Eco aparecerá con su icono, como una app más.', icon: <Logo size={32} /> }
-      ];
+    : where === 'bottom-right'
+      ? [
+          { title: 'Toca los tres puntos', text: 'Abajo a la derecha, en la barra de Safari (junto a la dirección).', icon: box(<Dots />) },
+          { title: 'Toca Compartir', text: 'El cuadrado con la flecha hacia arriba.', icon: <ShareGlyph /> },
+          add,
+          done
+        ]
+      : [
+          { title: 'Toca Compartir', text: where === 'top-right' ? 'Arriba a la derecha, en la barra de direcciones.' : 'El cuadrado con la flecha, en la barra de abajo.', icon: <ShareGlyph /> },
+          add,
+          done
+        ];
+  const arrow = {
+    'bottom-right': 'bottom-1 right-6 justify-end',
+    bottom: 'bottom-1 inset-x-0 justify-center',
+    'top-right': 'top-[max(env(safe-area-inset-top),6px)] right-4 justify-end rotate-180'
+  }[where];
   return (
     <>
-      <Sheet onClose={onClose} title="Instalar en 3 pasos">
-        <div className="pb-safe space-y-3 px-5 pb-6 pt-3">
-          {steps.map((s, i) => (
-            <motion.div key={s.n} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 + i * 0.12 }} className="flex items-center gap-4 rounded-[22px] bg-surface p-4">
-              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-paper text-accent">{s.icon}</span>
+      <Sheet onClose={onClose} title={`Instalar en ${steps.length} toques`}>
+        <div className="pb-safe space-y-2.5 px-5 pb-6 pt-3">
+          {steps.map((st, i) => (
+            <motion.div key={st.title} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 + i * 0.12 }} className="flex items-center gap-4 rounded-[22px] bg-surface p-4">
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-paper text-accent">{st.icon}</span>
               <div>
-                <p className="text-[16px] font-semibold"><span className="text-ink3">{s.n}.</span> {s.title}</p>
-                <p className="text-[14px] text-ink2">{s.text}</p>
+                <p className="text-[16px] font-semibold"><span className="text-ink3">{i + 1}.</span> {st.title}</p>
+                <p className="text-[14px] text-ink2">{st.text}</p>
               </div>
             </motion.div>
           ))}
-          <Press scale={0.97} onClick={onClose} className="btn-ink mt-2 w-full">Entendido</Press>
+          <p className="px-1 pt-1 text-center text-[13px] text-ink3">Es la única forma que permite Apple: ninguna web puede instalarse sola en iPhone.</p>
+          <Press scale={0.97} onClick={onClose} className="btn-ink mt-1 w-full">Entendido</Press>
         </div>
       </Sheet>
-      {/* Flecha que señala la barra de Safari (abajo en iPhone) */}
-      {ios && (
-        <motion.div className="pointer-events-none fixed inset-x-0 bottom-1 z-[60] flex justify-center text-accent" initial={{ opacity: 0 }} animate={{ opacity: 1, y: [0, 10, 0] }} exit={{ opacity: 0 }} transition={{ y: { repeat: Infinity, duration: 1.1 }, delay: 0.6 }}>
-          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4v15M5 12l7 7 7-7" /></svg>
+      {/* Flecha que señala el botón del navegador */}
+      {p.ios && (
+        <motion.div className={`pointer-events-none fixed z-[60] flex text-accent ${arrow}`} initial={{ opacity: 0 }} animate={{ opacity: 1, y: where === 'top-right' ? [0, -10, 0] : [0, 10, 0] }} exit={{ opacity: 0 }} transition={{ y: { repeat: Infinity, duration: 1.1 }, delay: 0.6 }}>
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4v15M5 12l7 7 7-7" /></svg>
         </motion.div>
       )}
     </>
+  );
+}
+
+function Dots() {
+  return (
+    <svg width="18" height="6" viewBox="0 0 18 6" fill="currentColor" aria-hidden="true"><circle cx="3" cy="3" r="2" /><circle cx="9" cy="3" r="2" /><circle cx="15" cy="3" r="2" /></svg>
   );
 }
 

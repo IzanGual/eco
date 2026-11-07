@@ -109,8 +109,10 @@ button {
   .glass {
     position: relative;
     background: rgb(var(--glass-fill) / 0.58);
-    -webkit-backdrop-filter: blur(22px) saturate(190%) brightness(1.04);
-    backdrop-filter: blur(22px) saturate(190%) brightness(1.04);
+    /* Un solo desenfoque moderado: en iPhone cada capa de backdrop-filter cuesta mucho */
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    backdrop-filter: blur(16px) saturate(180%);
+    transform: translateZ(0);
     box-shadow:
       inset 0 1px 0.5px rgb(var(--glass-edge) / 0.75),
       inset 0 -0.5px 0.5px rgb(var(--glass-edge) / 0.25),
@@ -132,8 +134,7 @@ button {
     inset: 0;
     border-radius: inherit;
     pointer-events: none;
-    background: linear-gradient(180deg, rgb(255 255 255 / 0.35), rgb(255 255 255 / 0) 42%);
-    mix-blend-mode: soft-light;
+    background: linear-gradient(180deg, rgb(255 255 255 / 0.22), rgb(255 255 255 / 0) 42%);
   }
   .glass-tint {
     background: rgb(var(--ink) / 0.07);
@@ -163,21 +164,25 @@ button {
   opacity: 0;
 }
 
-/* ---------- Modo privacidad («ojito») ---------- */
+/* ---------- Modo privacidad («ojito») ----------
+   Antes usábamos filter: blur(), que en Safari se recorta en cuadrados al componer capas.
+   Ahora el texto se vuelve transparente y solo queda su sombra difuminada: suave, sin cortes y barato. */
 .num,
 .money {
-  transition: filter 0.35s ease, opacity 0.35s ease;
+  transition: color 0.3s ease, text-shadow 0.3s ease;
 }
 .privacy .num,
-.privacy .money {
-  filter: blur(9px);
-  opacity: 0.85;
+.privacy .money,
+.privacy .num *,
+.privacy .money * {
+  color: transparent !important;
+  text-shadow: 0 0 0.32em rgb(var(--ink) / 0.55);
   -webkit-user-select: none;
   user-select: none;
 }
-.privacy .money-chart {
-  filter: blur(6px);
-}
+.privacy .text-pos.num, .privacy .text-pos .num, .privacy .num.text-pos * { text-shadow: 0 0 0.32em rgb(var(--pos) / 0.7); }
+.privacy .text-accent.num, .privacy .text-accent .num, .privacy .num.text-accent * { text-shadow: 0 0 0.32em rgb(var(--accent) / 0.7); }
+.privacy .text-paper .num, .privacy .text-paper.num, .privacy .bg-ink .num, .privacy .story .num, .privacy .story .money, .privacy .story .num * { text-shadow: 0 0 0.32em rgb(241 236 226 / 0.6); }
 
 /* Bloqueo del scroll del fondo con una hoja abierta */
 html.scroll-locked,

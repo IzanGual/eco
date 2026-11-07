@@ -40,37 +40,41 @@ export function Tile({ icon, color, size = 40, active }: { icon: string; color: 
 
 // ---------- Número animado ----------
 export function Amount({ cents, className, sign, compact }: { cents: number; className?: string; sign?: boolean; compact?: boolean }) {
+  const ref = useRef<HTMLSpanElement>(null);
   const mv = useMotionValue(cents);
-  const [shown, setShown] = useState(cents);
-  const first = useRef(true);
+  // Escribimos directamente en el DOM: un render de React por fotograma iba a tirones en iPhone
   useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      mv.set(cents);
-      setShown(cents);
-      return;
-    }
-    const ctl = animate(mv, cents, { duration: 0.6, ease: [0.22, 1, 0.36, 1], onUpdate: (v) => setShown(Math.round(v)) });
+    const ctl = animate(mv, cents, { duration: 0.6, ease: [0.22, 1, 0.36, 1], onUpdate: (v) => { if (ref.current) ref.current.textContent = fmt(Math.round(v), { sign, compact }); } });
     return () => ctl.stop();
   }, [cents]); // eslint-disable-line react-hooks/exhaustive-deps
-  return <span className={className}>{fmt(shown, { sign, compact })}</span>;
+  return <span ref={ref} className={className}>{fmt(cents, { sign, compact })}</span>;
 }
+
+const splitAmount = (v: number) => {
+  const m = fmt(v).match(/^(.*?)(,\d{2})?(\s?€)?$/);
+  return [m?.[1] ?? '', `${m?.[2] ?? ''}${m?.[3] ?? ''}`];
+};
 
 /** Importe grande en serif con los céntimos más pequeños: 4.564,10 € */
 export function BigAmount({ cents, className = '', animated = true }: { cents: number; className?: string; animated?: boolean }) {
+  const intRef = useRef<HTMLSpanElement>(null);
+  const decRef = useRef<HTMLSpanElement>(null);
   const mv = useMotionValue(cents);
-  const [v, setV] = useState(cents);
+  const [first] = useState(() => splitAmount(cents));
   useEffect(() => {
-    if (!animated) return setV(cents);
-    const ctl = animate(mv, cents, { duration: 0.7, ease: [0.22, 1, 0.36, 1], onUpdate: (x) => setV(Math.round(x)) });
+    const paint = (x: number) => {
+      const [a, b] = splitAmount(Math.round(x));
+      if (intRef.current) intRef.current.textContent = a;
+      if (decRef.current) decRef.current.textContent = b;
+    };
+    if (!animated) { mv.set(cents); paint(cents); return; }
+    const ctl = animate(mv, cents, { duration: 0.7, ease: [0.22, 1, 0.36, 1], onUpdate: paint });
     return () => ctl.stop();
   }, [cents]); // eslint-disable-line react-hooks/exhaustive-deps
-  const s = fmt(v);
-  const m = s.match(/^(.*?)(,\d{2})?(\s?€)?$/);
   return (
     <span className={`num leading-none ${className}`}>
-      {m?.[1]}
-      <span className="text-[0.55em]">{m?.[2]}{m?.[3]}</span>
+      <span ref={intRef}>{first[0]}</span>
+      <span ref={decRef} className="text-[0.55em]">{first[1]}</span>
     </span>
   );
 }
@@ -101,7 +105,7 @@ export function Progress({ value, color }: { value: number; color?: string }) {
   const c = color ?? (value >= 1 ? 'rgb(var(--accent))' : value >= 0.8 ? 'rgb(var(--warn))' : 'rgb(var(--ink))');
   return (
     <div className="h-[5px] w-full overflow-hidden rounded-full bg-ink/[0.08]">
-      <motion.div className="h-full rounded-full" initial={{ width: 0 }} animate={{ width: `${pct * 100}%` }} transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }} style={{ background: c }} />
+      <motion.div className="h-full w-full rounded-full" initial={{ scaleX: 0 }} animate={{ scaleX: pct }} transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }} style={{ background: c, transformOrigin: 'left' }} />
     </div>
   );
 }
@@ -174,7 +178,7 @@ export function Page({ title, onBack, right, children, footer, eyebrow }: {
       animate={{ x: 0 }}
       exit={{ x: '100%' }}
       transition={{ type: 'spring', stiffness: 380, damping: 40 }}
-      className="fixed inset-0 flex flex-col bg-paper shadow-[-20px_0_40px_rgb(0_0_0/0.12)]"
+      className="fixed inset-0 flex flex-col bg-paper will-change-transform"
     >
       <div ref={ref} className="flex-1 overflow-y-auto overscroll-contain pb-10">
         <LargeTitle title={title} scrollRef={ref} eyebrow={eyebrow} left={<GlassIconButton onClick={onBack} label="Atrás"><ArrowLeft size={20} /></GlassIconButton>} right={right} />
@@ -356,4 +360,23 @@ export function Logo({ size = 32, plain }: { size?: number; plain?: boolean }) {
       <circle cx={LOGO_DOT.cx} cy={LOGO_DOT.cy} r={LOGO_DOT.r} fill="rgb(var(--accent))" />
     </svg>
   );
+}
+
+/**
+ * iOS solo abre el teclado si el foco se pone en el mismo toque del usuario. El formulario se monta un instante
+ * después, así que enfocamos un campo invisible ya mismo y el formulario le «roba» el foco al montarse:
+ * el teclado numérico aparece sin tener que tocar el importe.
+ */
+export function focusKeyboard() {
+  let el = document.getElementById('kbd-proxy') as HTMLInputElement | null;
+  if (!el) {
+    el = document.createElement('input');
+    el.id = 'kbd-proxy';
+    el.setAttribute('inputmode', 'decimal');
+    el.setAttribute('aria-hidden', 'true');
+    el.tabIndex = -1;
+    el.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;font-size:16px;border:0;padding:0;pointer-events:none;';
+    document.body.appendChild(el);
+  }
+  el.focus({ preventScroll: true });
 }

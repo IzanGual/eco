@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Add, ArrowRight, Calendar, Grid, Camera, Checkmark, ChevronLeft, ChevronRight, Close, Edit, Erase, Repeat, Search, Subtract, TrashCan, UserMultiple, Wallet as WalletIcon
+  Add, ArrowRight, Calendar, Camera, Checkmark, ChevronLeft, ChevronRight, Close, Edit, Repeat, Search, TrashCan, UserMultiple, Wallet as WalletIcon
 } from '@carbon/icons-react';
 import { db, type Category, type DebtDir, type Frequency, type Transaction, type TxType } from '../db';
 import { addDays, centsToInput, compressImage, dayLabel, FREQ_LABEL, fmt, nextOccurrence, parseAmount, personBalances, processRecurring, todayISO } from '../lib';
@@ -23,7 +23,6 @@ function evaluate(expr: string): number {
   }
   return total;
 }
-const hasOp = (e: string) => /[+−]/.test(e.slice(1));
 
 const TITLES: Record<TxType, string> = { expense: 'Nuevo gasto', income: 'Nuevo ingreso', transfer: 'Mover dinero', debt: 'Préstamo' };
 const SAVE: Record<TxType, string> = { expense: 'Guardar gasto', income: 'Guardar ingreso', transfer: 'Guardar', debt: 'Guardar' };
@@ -129,40 +128,28 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
     if (hit?.categoryId != null) setCategoryId(hit.categoryId);
   }, [note]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // La elegida siempre se ve en la cuadrícula, aunque no sea de las frecuentes
+  // Todas las categorías principales, ordenadas por lo que más usas (las subcategorías salen al elegir)
   const gridCats = useMemo(() => {
-    const list = [...frequent];
-    const shown = selectedParent ?? selected;
-    if (shown && !list.some((c) => c.id === shown.id || c.id === selected?.id)) list.splice(list.length - 1, 1, shown);
-    return list.slice(0, 7);
-  }, [frequent, selected, selectedParent]);
+    const score = new Map<number, number>();
+    frequent.forEach((c, i) => {
+      const root = c.parentId ?? c.id!;
+      score.set(root, Math.max(score.get(root) ?? 0, 100 - i));
+    });
+    return categories
+      .filter((c) => c.type === catType && c.parentId == null)
+      .sort((a, b) => (score.get(b.id!) ?? 0) - (score.get(a.id!) ?? 0) || a.order - b.order);
+  }, [categories, catType, frequent]);
 
   const cents = evaluate(expr);
-  const pending = hasOp(expr);
   const share = shareOn ? (shareExpr === 'half' ? Math.round(cents / 2) : parseAmount(shareExpr)) : 0;
-
-  function key(k: string) {
-    setExpr((e) => {
-      const last = e.split(/[+−]/).pop() ?? '';
-      if (k === 'back') return e.slice(0, -1);
-      if (k === '+' || k === '−') {
-        if (!e) return e;
-        if (/[+−]$/.test(e)) return e.slice(0, -1) + k;
-        return e + k;
-      }
-      if (k === ',') {
-        if (last.includes(',')) return e;
-        return e + (last === '' ? '0,' : ',');
-      }
-      if (last.includes(',') && last.split(',')[1].length >= 2) return e;
-      if (last.replace(',', '').length >= 8) return e;
-      if (last === '0') return e.slice(0, -1) + k;
-      return e + k;
-    });
-  }
+  const amountRef = useRef<HTMLInputElement>(null);
+  // El teclado del móvil ya viene abierto desde el botón + (ver focusKeyboard): pasamos el foco al importe
+  useEffect(() => {
+    if (isNew && !expr) amountRef.current?.focus({ preventScroll: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const missing =
-    cents <= 0 ? 'Escribe el importe con el teclado'
+    cents <= 0 ? 'Escribe el importe'
     : type === 'transfer' ? (toWalletId == null || toWalletId === walletId ? 'Elige a qué cartera va' : '')
     : type === 'debt' ? (personId == null ? 'Elige con quién' : '')
     : categoryId == null ? 'Elige una categoría'
@@ -171,7 +158,6 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
   const valid = !missing && walletId != null;
 
   async function save() {
-    if (pending) return setExpr(cents > 0 ? centsToInput(cents) : '');
     if (!valid) {
       setShake((s) => s + 1);
       if (cents > 0 && type !== 'transfer' && type !== 'debt' && categoryId == null) setSheet('category');
@@ -239,7 +225,6 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
   const wallet = walletId != null ? walletMap.get(walletId) : undefined;
   const toWallet = toWalletId != null ? walletMap.get(toWalletId) : undefined;
   const person = personId != null ? personMap.get(personId) : undefined;
-  const display = expr || '0';
   const debtAfter = (() => {
     if (type !== 'debt' || personId == null) return null;
     const cur = personBalances(txs).get(personId) ?? 0;
@@ -254,7 +239,8 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
       <div className="flex items-center gap-2 px-4 pb-3">
         <GlassIconButton onClick={nav.pop} label="Cerrar"><Close size={20} /></GlassIconButton>
         <span className="flex-1 text-center text-[17px] font-semibold">{isNew ? TITLES[type] : 'Editar'}</span>
-        {isNew ? <span className="w-10" /> : <GlassIconButton onClick={remove} label="Eliminar" className="text-accent"><TrashCan size={20} /></GlassIconButton>}
+        {!isNew && <GlassIconButton onClick={remove} label="Eliminar" className="text-accent"><TrashCan size={20} /></GlassIconButton>}
+        <Press scale={0.92} onClick={save} className={`h-10 rounded-full px-4 text-[15px] font-semibold transition-colors ${valid ? 'bg-accent text-white' : 'bg-ink/[0.07] text-ink3'}`}>Guardar</Press>
       </div>
       <div className="px-4">
         <Segmented
@@ -267,47 +253,51 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
 
       <div
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4"
-        onFocus={(e) => (e.target as HTMLElement).tagName === 'INPUT' && (e.target as HTMLInputElement).type === 'text' && setTyping(true)}
+        onFocus={(e) => (e.target as HTMLElement).tagName === 'INPUT' && (e.target as HTMLInputElement).type !== 'date' && (e.target as HTMLInputElement).type !== 'file' && setTyping(true)}
         onBlur={() => setTimeout(() => setTyping(false), 120)}
       >
-        {/* Importe */}
-        <motion.div key={shake} animate={shake ? { x: [0, -10, 9, -6, 4, 0] } : {}} transition={{ duration: 0.4 }} className="flex flex-col items-center pb-2 pt-5">
-          <div className={`flex items-baseline font-serif tabular-nums leading-none ${type === 'income' ? 'text-pos' : expr ? '' : 'text-ink3'}`}>
-            <AnimatePresence mode="popLayout" initial={false}>
-              {display.split('').map((ch, i) => (
-                <motion.span key={i + ch} initial={{ y: 18, opacity: 0, scale: 0.8 }} animate={{ y: 0, opacity: 1, scale: 1 }} exit={{ y: -14, opacity: 0 }} transition={spring} className={`${display.length > 9 ? 'text-[44px]' : 'text-[64px]'} ${/[+−]/.test(ch) ? 'px-1 text-ink3' : ''}`}>
-                  {ch}
-                </motion.span>
-              ))}
-            </AnimatePresence>
-            <span className="ml-1.5 text-[32px] text-ink3">€</span>
-          </div>
-          <div className="mt-1 h-5 text-[14px] text-ink3">{pending ? `= ${fmt(cents)}` : ''}</div>
-        </motion.div>
+        {/* Importe: teclado numérico del propio móvil */}
+        <motion.label key={shake} animate={shake ? { x: [0, -10, 9, -6, 4, 0] } : {}} transition={{ duration: 0.4 }} className="flex items-baseline justify-center gap-1.5 pb-4 pt-6">
+          <input
+            ref={amountRef}
+            value={expr}
+            onChange={(e) => setExpr(e.target.value.replace(/[^\d.,]/g, '').replace('.', ','))}
+            inputMode="decimal"
+            enterKeyHint="next"
+            placeholder="0"
+            aria-label="Importe"
+            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+            style={{ width: `${Math.max(1, expr.length || 1) + 0.4}ch` }}
+            className={`max-w-[80%] bg-transparent text-right font-serif text-[64px] leading-none tabular-nums caret-accent outline-none placeholder:text-ink3 ${type === 'income' ? 'text-pos' : ''}`}
+          />
+          <span className="font-serif text-[34px] text-ink3">€</span>
+        </motion.label>
 
-        {/* Categoría: las 7 más usadas a un toque, y «Todas» para el resto */}
+        {/* Categoría: todas las principales a la vista, las más usadas primero */}
         {(type === 'expense' || type === 'income') && (
           <>
-            <div className="grid grid-cols-4 gap-x-1 gap-y-2">
+            <div className="flex items-baseline justify-between px-1 pb-2.5">
+              <span className="text-[15px] font-semibold">¿En qué?</span>
+              <span className={`text-[13px] ${selected ? 'font-semibold text-ink' : 'text-ink3'}`}>{selected ? (selectedParent ? `${selectedParent.name} › ${selected.name}` : selected.name) : 'Toca una categoría'}</span>
+            </div>
+            <div className="grid grid-cols-4 gap-x-1.5 gap-y-3">
               {gridCats.map((c) => {
-                const on = categoryId === c.id || (c.parentId == null && selected?.parentId === c.id);
+                const on = categoryId === c.id || selected?.parentId === c.id;
                 return (
-                  <Press key={c.id} scale={0.88} onClick={() => setCategoryId(c.id)} className="flex min-w-0 flex-col items-center gap-1 py-0.5">
-                    <motion.span animate={on ? { scale: [1, 1.12, 1] } : { scale: 1 }} transition={{ duration: 0.3 }}>
-                      <Tile icon={c.icon} color={c.color} size={48} active={on} />
-                    </motion.span>
-                    <span className={`w-full truncate text-center text-[11.5px] ${on ? 'font-semibold text-ink' : 'text-ink2'}`}>{c.name}</span>
+                  <Press key={c.id} scale={0.88} onClick={() => { setCategoryId(c.id); amountRef.current?.blur(); }} className="flex min-w-0 flex-col items-center gap-1.5">
+                    <Tile icon={c.icon} color={c.color} size={52} active={on} />
+                    <span className={`line-clamp-2 w-full text-center text-[12px] leading-tight ${on ? 'font-semibold text-ink' : 'text-ink2'}`}>{c.name}</span>
                   </Press>
                 );
               })}
-              <Press scale={0.88} onClick={() => setSheet('category')} className="flex flex-col items-center gap-1 py-0.5">
-                <span className="flex h-12 w-12 items-center justify-center rounded-[16px] bg-ink/[0.06] text-ink2"><Grid size={22} /></span>
-                <span className="text-[11.5px] text-ink2">Todas</span>
+              <Press scale={0.88} onClick={() => nav.push({ name: 'categoryEdit', type: catType, parentId: null })} className="flex flex-col items-center gap-1.5">
+                <span className="flex h-[52px] w-[52px] items-center justify-center rounded-[18px] border-[1.5px] border-dashed border-ink/20 text-ink3"><Add size={22} /></span>
+                <span className="text-[12px] text-ink3">Nueva</span>
               </Press>
             </div>
             <AnimatePresence initial={false}>
               {subParent && subs.length > 0 && (
-                <motion.div key={subParent.id} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pt-2.5">
+                <motion.div key={subParent.id} initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4 pt-2.5">
                   {[subParent, ...subs].map((c, i) => {
                     const on = categoryId === c.id;
                     return (
@@ -374,7 +364,7 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
           </div>
           <AnimatePresence>
             {suggestions.length > 0 && (
-              <motion.div initial={{ height: 0 }} animate={{ height: 'auto' }} exit={{ height: 0 }} className="no-scrollbar flex gap-2 overflow-x-auto px-4 pb-3">
+              <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="no-scrollbar flex gap-2 overflow-x-auto px-4 pb-3">
                 {suggestions.map((s) => {
                   const c = s.categoryId != null ? catMap.get(s.categoryId) : undefined;
                   return (
@@ -440,7 +430,7 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
             </Press>
             <AnimatePresence>
               {shareOn && (
-                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="border-t hair">
+                <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="border-t hair">
                   <Row icon={<Avatar name={personMap.get(sharePerson!)?.name} color={personMap.get(sharePerson!)?.color} size={22} />} label="Quién" onClick={() => setSheet('sharePerson')}>
                     {sharePerson != null ? personMap.get(sharePerson)?.name : 'Elegir'}
                   </Row>
@@ -467,26 +457,15 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
         )}
       </div>
 
-      {/* Teclado propio (se esconde mientras escribes la nota) */}
-      <AnimatePresence initial={false}>
-        {!typing && (
-          <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }} transition={{ duration: 0.2 }} className="pb-safe border-t px-3 pt-2 hair">
-            <div className="mb-1.5 h-4 text-center text-[12px] font-medium text-ink3">{missing}</div>
-            <div className="grid grid-cols-4 gap-1.5">
-              {['1', '2', '3', 'back', '4', '5', '6', '+', '7', '8', '9', '−', ',', '0'].map((k) => (
-                <Key key={k} k={k} onPress={key} />
-              ))}
-              <Press
-                scale={0.95}
-                onClick={save}
-                className={`col-span-2 flex h-[50px] items-center justify-center gap-2 rounded-[16px] text-[16px] font-semibold transition-colors ${valid || pending ? 'bg-accent text-white' : 'bg-ink/[0.08] text-ink3'}`}
-              >
-                {pending ? '= Calcular' : (<><Checkmark size={20} /> {isNew ? SAVE[type] : 'Guardar'}</>)}
-              </Press>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Guardar (se esconde mientras escribes, el de arriba sigue a mano) */}
+      {!typing && (
+        <div className="pb-safe border-t px-4 pt-2.5 hair">
+          <div className="mb-2 h-4 text-center text-[12px] font-medium text-ink3">{missing}</div>
+          <Press scale={0.97} onClick={save} className={`flex h-[54px] w-full items-center justify-center gap-2 rounded-full text-[17px] font-semibold transition-colors ${valid ? 'bg-accent text-white' : 'bg-ink/[0.08] text-ink3'}`}>
+            <Checkmark size={20} /> {isNew ? SAVE[type] : 'Guardar cambios'}
+          </Press>
+        </div>
+      )}
 
       {/* Hojas de selección */}
       <AnimatePresence>
@@ -657,21 +636,6 @@ function Row({ icon, label, children, onClick }: { icon: ReactNode; label: strin
       <span className="flex-1 text-[15px] text-ink2">{label}</span>
       <span className="flex items-center gap-1 text-[15px] font-semibold">{children}</span>
       {onClick && <ChevronRight size={16} className="text-ink3" />}
-    </Press>
-  );
-}
-
-function Key({ k, onPress }: { k: string; onPress: (k: string) => void }) {
-  const label = k === 'back' ? <Erase size={22} /> : k === '+' ? <Add size={22} /> : k === '−' ? <Subtract size={22} /> : k;
-  const op = k === 'back' || k === '+' || k === '−';
-  return (
-    <Press
-      scale={0.9}
-      onClick={() => onPress(k)}
-      className={`flex h-[50px] items-center justify-center rounded-[16px] ${op ? 'bg-ink/[0.06] text-ink2' : 'bg-surface font-serif text-[28px]'}`}
-      aria-label={k === 'back' ? 'Borrar' : k === '+' ? 'Sumar' : k === '−' ? 'Restar' : k}
-    >
-      {label}
     </Press>
   );
 }

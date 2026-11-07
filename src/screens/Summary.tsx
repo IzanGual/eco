@@ -95,8 +95,9 @@ export function Summary({ kind, offset }: { kind: 'week' | 'month'; offset: numb
               <div key={d.date} className="flex h-full flex-1 flex-col items-center justify-end gap-2">
                 <motion.div
                   className={`w-full rounded-[5px] ${d.date === maxDay.date ? 'bg-accent' : 'bg-paper/35'}`}
-                  initial={{ height: 0 }}
-                  animate={{ height: d.v ? `${Math.max(4, (d.v / maxV) * 100)}%` : 3 }}
+                  style={{ height: d.v ? `${Math.max(4, (d.v / maxV) * 100)}%` : 3, transformOrigin: 'bottom' }}
+                  initial={{ scaleY: 0 }}
+                  animate={{ scaleY: 1 }}
                   transition={{ delay: 0.5 + i * (kind === 'week' ? 0.08 : 0.025), type: 'spring', stiffness: 160, damping: 18 }}
                 />
                 {kind === 'week' && <span className="text-[12px] opacity-50">{'LMXJVSD'[i]}</span>}
@@ -123,7 +124,7 @@ export function Summary({ kind, offset }: { kind: 'week' | 'month'; offset: numb
                       <span className="num text-[22px]">{fmt(x.v, { compact: true })}</span>
                     </div>
                     <div className="mt-2 h-[6px] overflow-hidden rounded-full bg-paper/15">
-                      <motion.div className="h-full rounded-full" style={{ background: x.c?.color ?? '#9A9386' }} initial={{ width: 0 }} animate={{ width: `${x.pct * 100}%` }} transition={{ delay: 0.6 + i * 0.15, duration: 0.9, ease }} />
+                      <motion.div className="h-full rounded-full" style={{ background: x.c?.color ?? '#9A9386', width: `${x.pct * 100}%`, transformOrigin: 'left' }} initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} transition={{ delay: 0.6 + i * 0.15, duration: 0.9, ease }} />
                     </div>
                   </div>
                 </div>
@@ -247,7 +248,7 @@ function Story({ slides, onClose }: { slides: ReactNode[]; onClose: () => void }
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.94 }}
       transition={{ duration: 0.3, ease }}
-      className="fixed inset-0 select-none overflow-hidden bg-[#141311] text-[#F1ECE2] [--paper:241_236_226] [--ink:20_19_17]"
+      className="story fixed inset-0 select-none overflow-hidden bg-[#141311] text-[#F1ECE2] [--paper:241_236_226] [--ink:20_19_17]"
       onPointerDown={() => { pressAt.current = performance.now(); setPaused(true); }}
       onPointerUp={(e) => {
         setPaused(false);

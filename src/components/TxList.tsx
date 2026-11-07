@@ -6,7 +6,7 @@ import { dayLabel, fmt } from '../lib';
 import { useData } from '../store';
 import { useNav } from '../nav';
 import { Press, Tile, confirmDialog, toast } from './ui';
-import { useHousehold } from '../screens/Couple';
+import { useHousehold } from '../useHousehold';
 import { memberName } from '../sync';
 
 const REVEAL = 84;

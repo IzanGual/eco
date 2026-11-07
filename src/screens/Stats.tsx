@@ -6,7 +6,7 @@ import { addDays, daysBetween, fmt, fromISO, getPeriod, monthShort, todayISO, to
 import { useData } from '../store';
 import { useNav } from '../nav';
 import { BigAmount, Empty, LargeTitle, PrivacyToggle, Press, Segmented, Tile, toast } from '../components/ui';
-import { useHousehold } from './Couple';
+import { useHousehold } from '../useHousehold';
 
 type Kind = Exclude<PeriodKind, 'day'>;
 
@@ -178,14 +178,15 @@ export function Stats() {
           </div>
           <p className="mt-1 text-[13px] text-ink3">Media <span className="money">{fmt(avg)}</span> {kind === 'year' ? 'al mes' : 'al día'}{diff != null ? (offset === 0 ? ' · frente a los mismos días del periodo anterior' : ' · frente al periodo anterior') : ''}</p>
 
-          <div className="money-chart relative mt-5 flex h-40 items-end gap-[3px]" onPointerLeave={() => setHover(null)}>
+          <div key={`${period.start}-${type}`} className="money-chart relative mt-5 flex h-40 items-end gap-[3px]" onPointerLeave={() => setHover(null)}>
             <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-ink/20" style={{ bottom: `${(avg / maxBar) * 100}%` }} />
             {bars.map((b, i) => (
               <div key={b.key} className="flex h-full flex-1 items-end" onPointerEnter={() => setHover(i)} onPointerDown={() => setHover(i)}>
                 <motion.div
                   className={`w-full rounded-[4px] ${hover === i || b.key === today ? (type === 'expense' ? 'bg-accent' : 'bg-pos') : 'bg-ink/80'}`}
-                  initial={{ height: 0 }}
-                  animate={{ height: b.value ? `${Math.max(2, (b.value / maxBar) * 100)}%` : 2, opacity: b.value ? 1 : 0.2 }}
+                  style={{ height: b.value ? `${Math.max(2, (b.value / maxBar) * 100)}%` : 2, transformOrigin: 'bottom' }}
+                  initial={{ scaleY: 0 }}
+                  animate={{ scaleY: 1, opacity: b.value ? 1 : 0.2 }}
                   transition={{ delay: i * 0.012, type: 'spring', stiffness: 220, damping: 24 }}
                 />
               </div>
@@ -233,7 +234,7 @@ export function Stats() {
                         </div>
                         <div className="mt-1.5 flex items-center gap-2">
                           <div className="h-[4px] flex-1 overflow-hidden rounded-full bg-ink/[0.07]">
-                            <motion.div className="h-full rounded-full" style={{ background: s.color }} initial={{ width: 0 }} animate={{ width: `${s.pct * 100}%` }} transition={{ delay: 0.2 + i * 0.05, duration: 0.7, ease: [0.22, 1, 0.36, 1] }} />
+                            <motion.div className="h-full rounded-full" style={{ background: s.color, width: `${s.pct * 100}%`, transformOrigin: 'left' }} initial={{ scaleX: 0 }} animate={{ scaleX: 1 }} transition={{ delay: 0.2 + i * 0.05, duration: 0.7, ease: [0.22, 1, 0.36, 1] }} />
                           </div>
                           <span className="w-9 text-right text-[12px] tabular-nums text-ink3">{Math.round(s.pct * 100)}%</span>
                         </div>

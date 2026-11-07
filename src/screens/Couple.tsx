@@ -2,15 +2,11 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Copy, Share, UserMultiple } from '@carbon/icons-react';
 import { onUser, signInWithGoogle, type CloudUser } from '../cloud';
-import { createHousehold, joinHousehold, leaveHousehold, lookupInvite, onHousehold, type Household } from '../sync';
+import { createHousehold, joinHousehold, leaveHousehold, lookupInvite } from '../sync';
+import { useHousehold } from '../useHousehold';
 import { useNav } from '../nav';
 import { Page, Press, confirmDialog, toast } from '../components/ui';
 
-export function useHousehold() {
-  const [h, setH] = useState<Household | null>(null);
-  useEffect(() => onHousehold(setH), []);
-  return h;
-}
 
 export const inviteLink = (code: string) => `${location.origin}${import.meta.env.BASE_URL}?unirse=${code}`;
 

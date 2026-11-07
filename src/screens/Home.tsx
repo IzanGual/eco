@@ -89,8 +89,9 @@ export function Home() {
                 <div className="flex w-full flex-1 items-end">
                   <motion.div
                     className={`w-full rounded-[5px] ${d.date === today ? 'bg-accent' : 'bg-paper/30'}`}
-                    initial={{ height: 0 }}
-                    animate={{ height: d.v ? `${Math.max(8, (d.v / weekMax) * 100)}%` : 3 }}
+                    style={{ height: d.v ? `${Math.max(8, (d.v / weekMax) * 100)}%` : 3, transformOrigin: 'bottom' }}
+                    initial={{ scaleY: 0 }}
+                    animate={{ scaleY: 1 }}
                     transition={{ delay: 0.3 + i * 0.05, type: 'spring', stiffness: 200, damping: 20 }}
                   />
                 </div>
