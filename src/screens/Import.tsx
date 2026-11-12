@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { DocumentImport } from '@carbon/icons-react';
-import { db, type Transaction, type TxType } from '../db';
-import { fmt, toISO } from '../lib';
+import { db, type Frequency, type Transaction, type TxType } from '../db';
+import { fmt, nextOccurrence, processRecurring, toISO } from '../lib';
 import { useData } from '../store';
 import { useNav } from '../nav';
 import { PALETTE } from '../icons';
@@ -66,7 +66,7 @@ export function parseDate(s: string): string | null {
   return Number.isNaN(t) ? null : toISO(new Date(t));
 }
 
-type Field = 'date' | 'amount' | 'type' | 'category' | 'subcategory' | 'wallet' | 'note';
+type Field = 'date' | 'amount' | 'type' | 'category' | 'subcategory' | 'wallet' | 'note' | 'repeat';
 const FIELDS: { key: Field; label: string; re: RegExp; required?: boolean }[] = [
   { key: 'date', label: 'Fecha', re: /fecha|date|d[ií]a/i, required: true },
   { key: 'amount', label: 'Importe', re: /importe|amount|cantidad|valor|monto|precio|value|sum/i, required: true },
@@ -74,8 +74,29 @@ const FIELDS: { key: Field; label: string; re: RegExp; required?: boolean }[] = 
   { key: 'category', label: 'Categoría', re: /^categor|^category/i },
   { key: 'subcategory', label: 'Subcategoría', re: /sub/i },
   { key: 'wallet', label: 'Cartera / cuenta', re: /cartera|cuenta|wallet|account|monedero/i },
-  { key: 'note', label: 'Nota', re: /nota|note|descrip|concepto|comment|memo|t[ií]tulo|title|nombre|name/i }
+  { key: 'note', label: 'Nota', re: /nota|note|descrip|concepto|comment|memo|t[ií]tulo|title|nombre|name/i },
+  { key: 'repeat', label: 'Repetir (mensual, semanal…)', re: /repet|recurr|frecuen|repeat/i }
 ];
+
+/** «mensual», «cada semana», «monthly»… → frecuencia de Eco */
+function guessFreq(v: string): Frequency | null {
+  const s = v.toLowerCase();
+  if (/diari|daily|cada d[ií]a/.test(s)) return 'daily';
+  if (/seman|week/.test(s)) return 'weekly';
+  if (/mens|month|cada mes/.test(s)) return 'monthly';
+  if (/anual|year|cada a[ñn]o/.test(s)) return 'yearly';
+  return null;
+}
+
+/** Icono razonable para una categoría nueva según su nombre */
+const ICON_HINTS: [RegExp, string][] = [
+  [/deport|gym|gimnas/i, 'running'], [/invers|bolsa|cripto/i, 'chart'], [/viaj/i, 'plane'], [/regal/i, 'gift'],
+  [/sueldo|n[oó]mina|trabajo|salario/i, 'briefcase'], [/paga|deuda|pr[eé]stamo/i, 'money'], [/moda|ropa/i, 'bag'],
+  [/aliment|comida|super/i, 'cart'], [/hogar|casa|alquiler/i, 'home'], [/suministr|luz|agua/i, 'idea'],
+  [/ocio|fiesta/i, 'events'], [/salud|m[eé]dic|dentist/i, 'health'], [/transport|gasolin|coche/i, 'car'],
+  [/suscrip/i, 'repeat'], [/invitaci/i, 'people'], [/educa|curso|estudi/i, 'education'], [/peluq|cuidado/i, 'cut']
+];
+const guessIcon = (name: string) => ICON_HINTS.find(([re]) => re.test(name))?.[1] ?? 'tag';
 
 function guessType(v: string): TxType | null {
   const s = v.toLowerCase();
@@ -114,7 +135,7 @@ export function ImportCSV() {
 
   const parsed = useMemo(() => {
     if (!rows || map.date == null || map.amount == null) return [];
-    const out: { date: string; amount: number; type: TxType; category: string; sub: string; wallet: string; note: string }[] = [];
+    const out: { date: string; amount: number; type: TxType; category: string; sub: string; wallet: string; note: string; repeat: Frequency | null }[] = [];
     const anyNegative = rows.slice(1).some((r) => (parseMoney(r[map.amount!] ?? '') ?? 0) < 0);
     for (const r of rows.slice(1)) {
       const date = parseDate(r[map.date] ?? '');
@@ -129,7 +150,8 @@ export function ImportCSV() {
         category: map.category != null ? r[map.category] ?? '' : '',
         sub: map.subcategory != null ? r[map.subcategory] ?? '' : '',
         wallet: map.wallet != null ? r[map.wallet] ?? '' : '',
-        note: map.note != null ? r[map.note] ?? '' : ''
+        note: map.note != null ? r[map.note] ?? '' : '',
+        repeat: map.repeat != null ? guessFreq(r[map.repeat] ?? '') : null
       });
     }
     return out;
@@ -141,9 +163,11 @@ export function ImportCSV() {
   async function doImport() {
     setBusy(true);
     try {
-      const existing = new Set(txs.map((t) => `${t.date}|${t.amount}|${t.type}|${t.note.toLowerCase()}`));
+      const byKey = new Map(txs.map((t) => [`${t.date}|${t.amount}|${t.type}|${t.note.toLowerCase()}`, t]));
+      const existing = new Set(byKey.keys());
+      let linked = 0;
       let added = 0;
-      await db.transaction('rw', db.categories, db.wallets, db.transactions, async () => {
+      await db.transaction('rw', db.categories, db.wallets, db.transactions, db.recurring, async () => {
         const cats = await db.categories.toArray();
         const ws = await db.wallets.toArray();
         const findCat = (name: string, type: 'expense' | 'income', parentId: number | null) =>
@@ -153,7 +177,16 @@ export function ImportCSV() {
         const newTx: Transaction[] = [];
         for (const p of parsed) {
           const key = `${p.date}|${p.amount}|${p.type}|${p.note.toLowerCase()}`;
-          if (existing.has(key)) continue;
+          if (existing.has(key)) {
+            // Ya estaba importado: si ahora viene marcado como repetición, se la añadimos
+            const old = byKey.get(key);
+            if (p.repeat && old && old.recurringId == null) {
+              const rid = await db.recurring.add({ type: old.type, amount: old.amount, walletId: old.walletId, categoryId: old.categoryId, note: old.note, frequency: p.repeat, nextDate: nextOccurrence(old.date, p.repeat), active: true });
+              await db.transactions.update(old.id!, { recurringId: rid });
+              linked++;
+            }
+            continue;
+          }
           existing.add(key);
           const type = p.type as 'expense' | 'income';
           // Cartera
@@ -173,8 +206,9 @@ export function ImportCSV() {
             let parent = findCat(p.category, type, null) ?? (p.sub ? undefined : findCatAny(p.category, type));
             if (!parent) {
               const color = PALETTE[cats.length % PALETTE.length];
-              const id = await db.categories.add({ name: p.category, icon: 'tag', color, type, parentId: null, order: cats.length });
-              parent = { id, name: p.category, icon: 'tag', color, type, parentId: null, order: cats.length };
+              const icon = guessIcon(p.category);
+              const id = await db.categories.add({ name: p.category, icon, color, type, parentId: null, order: cats.length });
+              parent = { id, name: p.category, icon, color, type, parentId: null, order: cats.length };
               cats.push(parent);
             }
             categoryId = parent.id;
@@ -190,12 +224,18 @@ export function ImportCSV() {
           } else {
             categoryId = (findCatAny(type === 'expense' ? 'Otros' : 'Otros ingresos', type) ?? cats.find((c) => c.type === type))?.id;
           }
-          newTx.push({ type, amount: p.amount, walletId, categoryId, date: p.date, note: p.note, createdAt: Date.now() });
+          // Si se repite, creamos la repetición a partir de este movimiento (la siguiente fecha la genera Eco)
+          let recurringId: number | undefined;
+          if (p.repeat) {
+            recurringId = await db.recurring.add({ type, amount: p.amount, walletId, categoryId, note: p.note, frequency: p.repeat, nextDate: nextOccurrence(p.date, p.repeat), active: true });
+          }
+          newTx.push({ type, amount: p.amount, walletId, categoryId, date: p.date, note: p.note, recurringId, createdAt: Date.now() });
         }
         await db.transactions.bulkAdd(newTx);
         added = newTx.length;
       });
-      toast(`${added} movimientos importados`);
+      await processRecurring(); // genera las repeticiones que ya hayan vencido hasta hoy
+      toast(linked && !added ? `${linked} repeticiones añadidas` : `${added} movimientos importados${linked ? ` y ${linked} repeticiones` : ''}`);
       nav.pop();
     } catch (e) {
       alert('No se pudo importar: ' + (e as Error).message);
