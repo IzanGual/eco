@@ -16,7 +16,9 @@ export interface Wallet {
   initialBalance: number; // céntimos
   order: number;
   archived?: boolean;
-  private?: boolean; // cartera solo mía: no se comparte, ni ella ni sus movimientos
+  shared?: boolean; // compartida con tu pareja: ella y sus movimientos se sincronizan
+  owner?: string; // uid de quien la compartió
+  private?: boolean; // (antiguo) ya no se usa
 }
 
 export interface Category {
@@ -124,7 +126,11 @@ class EcoDB extends Dexie {
 export const db = new EcoDB();
 
 /** Tablas que se comparten en el modo pareja. */
+// Tablas con ids aleatorios (para que dos móviles no choquen)
 export const SYNC_TABLES = ['wallets', 'categories', 'transactions', 'recurring', 'budgets', 'people'] as const;
+// Tablas que viajan al compartir una cartera
+export const SHARED_TABLES = ['wallets', 'transactions', 'recurring'] as const;
+export type SharedTable = (typeof SHARED_TABLES)[number];
 export type SyncTable = (typeof SYNC_TABLES)[number];
 
 // IDs aleatorios grandes para que dos móviles no creen el mismo id a la vez (cabe en 53 bits)

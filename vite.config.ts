@@ -10,8 +10,14 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
-      workbox: { globPatterns: ['**/*.{js,css,html,svg,png,woff2}'], maximumFileSizeToCacheInBytes: 3_000_000 },
+      registerType: 'prompt',
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        maximumFileSizeToCacheInBytes: 3_000_000,
+        // Todo sale de la caché: abre sin conexión y sin esperar a la red
+        navigateFallback: 'index.html',
+        cleanupOutdatedCaches: true
+      },
       includeAssets: ['icon.svg', 'apple-touch-icon.png', 'logo-light.svg', 'logo-dark.svg'],
       manifest: {
         name: 'Eco — Gastos',

@@ -11,7 +11,7 @@ import { useHousehold } from '../useHousehold';
 type Kind = Exclude<PeriodKind, 'day'>;
 
 export function Stats() {
-  const { txs, settings, catMap, categories } = useData();
+  const { txs, settings, catMap, categories, wallets } = useData();
   const nav = useNav();
   const [kind, setKind] = useState<Kind>('month');
   const [offset, setOffset] = useState(0);
@@ -57,10 +57,12 @@ export function Stats() {
   const byMember = useMemo(() => {
     if (!house) return [];
     const m = new Map<string, number>();
-    for (const x of cur) if (x.type === 'expense' && x.by) m.set(x.by, (m.get(x.by) ?? 0) + x.amount);
+    // Solo lo de las carteras compartidas: lo personal de cada uno no cuenta aquí
+    const sharedW = new Set(wallets.filter((w) => w.shared).map((w) => w.id));
+    for (const x of cur) if (x.type === 'expense' && x.by && sharedW.has(x.walletId)) m.set(x.by, (m.get(x.by) ?? 0) + x.amount);
     const total = [...m.values()].reduce((a, b) => a + b, 0);
     return house.members.map((uid) => ({ uid, name: (house.names[uid] || '?').split(' ')[0], v: m.get(uid) ?? 0, pct: total ? (m.get(uid) ?? 0) / total : 0 }));
-  }, [cur, house]);
+  }, [cur, house, wallets]);
 
   // Resumen en texto para pegarlo en ChatGPT, Claude o la IA que uses (en Soldi esto es de pago)
   async function shareForAI() {
@@ -152,7 +154,7 @@ export function Stats() {
         {/* Pareja: cuánto ha apuntado cada uno */}
         {house && house.members.length > 1 && byMember.length > 0 && (
           <div className="mt-3 rounded-[20px] bg-surface p-4">
-            <p className="text-[13px] text-ink3">Gastos apuntados por cada uno</p>
+            <p className="text-[13px] text-ink3">Gastos en carteras comunes, por persona</p>
             <div className="mt-2.5 flex h-2.5 overflow-hidden rounded-full">
               {byMember.map((m, i) => <div key={m.uid} style={{ width: `${m.pct * 100}%`, background: i === 0 ? 'rgb(var(--ink))' : 'rgb(var(--accent))' }} />)}
             </div>

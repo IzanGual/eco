@@ -28,7 +28,7 @@ export function TxRow({ t, showDate }: { t: Transaction; showDate?: boolean }) {
 
   const person = t.personId != null ? personMap.get(t.personId) : undefined;
   const debtLabel = t.type === 'debt' ? (t.dir === 'in' ? `${person?.name ?? '?'} te da` : `Prestado a ${person?.name ?? '?'}`) : '';
-  const title = t.type === 'debt' ? debtLabel : t.note || (t.type === 'transfer' ? `${wallet?.name ?? '?'} → ${to?.name ?? '?'}` : cat?.name ?? 'Sin categoría');
+  const title = t.type === 'debt' ? debtLabel : t.note || (t.type === 'transfer' ? `${wallet?.name ?? 'Otra cartera'} → ${to?.name ?? 'Otra cartera'}` : cat?.name ?? 'Sin categoría');
   const subtitle = t.type === 'debt' ? [t.note, showDate ? dayLabel(t.date) : null, wallet?.name, 'no cuenta como gasto'].filter(Boolean).join(' · ') : [
     t.type === 'transfer' ? (t.note ? `${wallet?.name} → ${to?.name}` : 'Transferencia') : t.note ? (parent ? `${parent.name} · ${cat?.name}` : cat?.name) : parent?.name,
     showDate ? dayLabel(t.date) : null,
@@ -82,7 +82,7 @@ export function TxRow({ t, showDate }: { t: Transaction; showDate?: boolean }) {
             <span className="truncate text-[15px] font-medium">{title}</span>
             {t.recurringId != null && <Repeat size={14} className="shrink-0 text-ink3" />}
             {t.photo && <ImageIcon size={14} className="shrink-0 text-ink3" />}
-            {house && (t.private || wallet?.private) && <Locked size={13} className="shrink-0 text-accent" aria-label="Solo para mí" />}
+            {house && t.private && (wallet?.shared || to?.shared) && <Locked size={13} className="shrink-0 text-accent" aria-label="Solo para mí" />}
             {t.by && house && house.members.length > 1 && (
               <span title={`Apuntado por ${memberName(t.by)}`} className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-ink/10 px-1 text-[10px] font-bold text-ink2">{memberName(t.by)?.[0]}</span>
             )}

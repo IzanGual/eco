@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Add, ChevronDown, ChevronRight, ChevronUp, Locked, TrashCan } from '@carbon/icons-react';
+import { Add, ChevronDown, ChevronRight, ChevronUp, TrashCan, UserMultiple } from '@carbon/icons-react';
 import { db, type CatType } from '../db';
 import { centsToInput, fmt, FREQ_LABEL, nextOccurrence, parseAmount, shortDate, todayISO, walletBalances } from '../lib';
 import { useData } from '../store';
 import { useNav } from '../nav';
 import { useHousehold } from '../useHousehold';
-import { resend } from '../sync';
+import { partnerName, setWalletShared } from '../sync';
 import { CatIcon } from '../icons';
 import { ColorPicker, Empty, GlassIconButton, Group, IconPicker, Page, Press, Segmented, Tile, confirmDialog, toast } from '../components/ui';
 
@@ -38,7 +38,7 @@ export function Wallets() {
           <motion.div layout key={w.id} className="flex items-center">
             <Press scale={0.98} className="flex flex-1 items-center gap-3.5 px-4 py-3.5 text-left" onClick={() => nav.push({ name: 'walletEdit', id: w.id })}>
               <Tile icon={w.icon} color={w.color} />
-              <span className="flex flex-1 items-center gap-1.5 text-[16px] font-medium">{w.name}{w.private && <Locked size={14} className="text-accent" />}</span>
+              <span className="flex flex-1 items-center gap-1.5 text-[16px] font-medium">{w.name}{w.shared && <UserMultiple size={14} className="text-accent" />}</span>
               <span className="num text-[20px]">{fmt(balances.get(w.id!) ?? 0)}</span>
             </Press>
             <div className="flex flex-col pr-2 text-ink3">
@@ -76,24 +76,43 @@ export function WalletEdit({ id }: { id?: number }) {
   const [initial, setInitial] = useState(w ? centsToInput(Math.abs(w.initialBalance)) : '');
   const [negative, setNegative] = useState((w?.initialBalance ?? 0) < 0);
   const [moveTo, setMoveTo] = useState<number | ''>('');
-  const [priv, setPriv] = useState(!!w?.private);
   const house = useHousehold();
+  const [sharing, setSharing] = useState(false);
+  const partner = partnerName();
   const others = allWallets.filter((x) => x.id !== id && !x.archived);
   const used = id != null && txs.some((t) => t.walletId === id || t.toWalletId === id);
 
   async function save() {
-    const data = { name: name.trim(), icon, color, initialBalance: parseAmount(initial) * (negative ? -1 : 1), private: priv || undefined };
-    if (w) {
-      await db.wallets.update(w.id!, data);
-      // Si cambia la privacidad, sus movimientos se retiran (o se vuelven a enviar) al espacio compartido
-      if (!!w.private !== priv) {
-        resend('transactions', txs.filter((t) => t.walletId === w.id || t.toWalletId === w.id).map((t) => t.id!));
-        resend('recurring', (await db.recurring.toArray()).filter((r) => r.walletId === w.id || r.toWalletId === w.id).map((r) => r.id!));
-      }
-    }
+    const data = { name: name.trim(), icon, color, initialBalance: parseAmount(initial) * (negative ? -1 : 1) };
+    if (w) await db.wallets.update(w.id!, data);
     else await db.wallets.add({ ...data, order: Math.max(-1, ...allWallets.map((x) => x.order)) + 1 });
     toast('Cartera guardada');
     nav.pop();
+  }
+
+  // Compartir con la pareja: se aplica al momento (no hace falta pulsar Guardar)
+  async function toggleShare() {
+    if (!w) return;
+    const on = !w.shared;
+    const ok = await confirmDialog(on ? `¿Compartir «${w.name}» con ${partner}?` : `¿Dejar de compartir «${w.name}»?`, {
+      message: on
+        ? `${partner} verá esta cartera y todos sus movimientos (también los de antes), y podrá apuntar en ella. Lo que marques «Solo para mí» no lo verá.`
+        : `${partner} dejará de verla y desaparecerá de su móvil. En el tuyo se queda todo.`,
+      confirm: on ? 'Compartir' : 'Dejar de compartir',
+      destructive: !on
+    });
+    if (!ok) return;
+    setSharing(true);
+    try {
+      await db.wallets.update(w.id!, { name: name.trim() || w.name, icon, color });
+      await setWalletShared(w.id!, on);
+      toast(on ? `Compartida con ${partner}` : 'Ya no se comparte');
+      nav.pop();
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setSharing(false);
+    }
   }
 
   async function remove() {
@@ -122,18 +141,27 @@ export function WalletEdit({ id }: { id?: number }) {
       </div>
       <p className="eyebrow px-1 pb-2">Nombre</p>
       <input className="field" placeholder="Cuenta ahorro" value={name} onChange={(e) => setName(e.target.value)} />
-      {house && house.members.length > 1 && (
-        <Press scale={0.99} onClick={() => setPriv((v) => !v)} className="mt-3 flex w-full items-center gap-3 rounded-[22px] bg-surface px-4 py-3.5 text-left">
-          <span className={priv ? 'text-accent' : 'text-ink3'}><Locked size={18} /></span>
+      {w && (house && house.members.length > 1 ? (
+        <Press scale={0.99} disabled={sharing} onClick={toggleShare} className="mt-3 flex w-full items-center gap-3 rounded-[22px] bg-surface px-4 py-3.5 text-left">
+          <span className={w.shared ? 'text-accent' : 'text-ink3'}><UserMultiple size={18} /></span>
           <span className="flex-1">
-            <span className="block text-[15px] font-medium">Solo para mí</span>
-            <span className="block text-[12px] text-ink3">{priv ? 'Tu pareja no verá esta cartera ni nada de lo que pagues con ella' : 'Tu pareja ve esta cartera y sus movimientos'}</span>
+            <span className="block text-[15px] font-medium">Compartida con {partner}</span>
+            <span className="block text-[12px] text-ink3">{w.shared ? `${partner} ve esta cartera y apunta en ella` : 'Solo la ves tú'}</span>
           </span>
-          <span className={`flex h-[28px] w-[46px] items-center rounded-full p-[3px] transition-colors ${priv ? 'bg-accent' : 'bg-ink/15'}`}>
-            <motion.span layout className={`h-[22px] w-[22px] rounded-full bg-white shadow ${priv ? 'ml-auto' : ''}`} />
+          <span className={`flex h-[28px] w-[46px] items-center rounded-full p-[3px] transition-colors ${w.shared ? 'bg-accent' : 'bg-ink/15'}`}>
+            <motion.span layout className={`h-[22px] w-[22px] rounded-full bg-white shadow ${w.shared ? 'ml-auto' : ''}`} />
           </span>
         </Press>
-      )}
+      ) : (
+        <Press scale={0.99} onClick={() => nav.push({ name: 'couple' })} className="mt-3 flex w-full items-center gap-3 rounded-[22px] bg-surface px-4 py-3.5 text-left">
+          <span className="text-ink3"><UserMultiple size={18} /></span>
+          <span className="flex-1">
+            <span className="block text-[15px] font-medium">Compartir con tu pareja</span>
+            <span className="block text-[12px] text-ink3">Primero conectad vuestros Eco en Ajustes → En pareja</span>
+          </span>
+          <ChevronRight size={16} className="text-ink3" />
+        </Press>
+      ))}
 
       <p className="eyebrow px-1 pb-2 pt-6">Saldo antes de empezar a apuntar</p>
       <div className="flex gap-2">

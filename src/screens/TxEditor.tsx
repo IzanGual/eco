@@ -9,6 +9,7 @@ import { addDays, centsToInput, compressImage, dayLabel, FREQ_LABEL, fmt, nextOc
 import { useData } from '../store';
 import { useNav } from '../nav';
 import { useHousehold } from '../useHousehold';
+import { partnerName } from '../sync';
 import { CatIcon, PALETTE } from '../icons';
 import { GlassIconButton, Press, Segmented, Sheet, Tile, confirmDialog, spring, toast } from '../components/ui';
 
@@ -192,7 +193,7 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
       note: note.trim(),
       photo,
       recurringId,
-      private: priv || !!walletMap.get(walletId!)?.private || undefined,
+      private: priv || undefined,
       createdAt: Date.now()
     };
     localStorage.setItem(LAST_WALLET, String(walletId));
@@ -389,6 +390,7 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
                   <Press key={w.id} scale={0.9} onClick={() => setWalletId(w.id)} className={`flex shrink-0 items-center gap-1.5 rounded-full py-1.5 pl-1.5 pr-3 text-[14px] font-semibold transition-colors ${walletId === w.id ? 'bg-ink text-paper' : 'bg-ink/[0.06] text-ink2'}`}>
                     <Tile icon={w.icon} color={w.color} size={22} active={walletId === w.id} />
                     {w.name}
+                    {w.shared && <UserMultiple size={13} className="opacity-70" />}
                   </Press>
                 ))}
                 {wallets.length > quickWallets.length && (
@@ -430,23 +432,19 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
         </div>
         {date > todayISO() && <p className="px-1 pt-2 text-[13px] text-ink3">Fecha futura: aparecerá en «Próximos» y no contará hasta ese día.</p>}
 
-        {/* Pareja: algo que no quieres que vea */}
-        {house && house.members.length > 1 && (() => {
-          const walletPriv = !!wallet?.private || !!toWallet?.private;
-          const on = priv || walletPriv;
-          return (
-            <Press scale={0.99} onClick={() => !walletPriv && setPriv((v) => !v)} className="mt-3 flex w-full items-center gap-3 rounded-[22px] bg-surface px-4 py-3.5 text-left">
-              <span className={on ? 'text-accent' : 'text-ink3'}><Locked size={18} /></span>
-              <span className="flex-1">
-                <span className="block text-[15px]">Solo para mí</span>
-                <span className="block text-[12px] text-ink3">{walletPriv ? 'Es de una cartera privada: tu pareja no lo verá' : on ? 'Tu pareja no lo verá' : 'Tu pareja lo verá en su móvil'}</span>
-              </span>
-              <span className={`flex h-[28px] w-[46px] items-center rounded-full p-[3px] transition-colors ${on ? 'bg-accent' : 'bg-ink/15'} ${walletPriv ? 'opacity-60' : ''}`}>
-                <motion.span layout transition={spring} className={`h-[22px] w-[22px] rounded-full bg-white shadow ${on ? 'ml-auto' : ''}`} />
-              </span>
-            </Press>
-          );
-        })()}
+        {/* Cartera compartida: algo que no quieres que vea tu pareja */}
+        {house && house.members.length > 1 && (wallet?.shared || toWallet?.shared) && (
+          <Press scale={0.99} onClick={() => setPriv((v) => !v)} className="mt-3 flex w-full items-center gap-3 rounded-[22px] bg-surface px-4 py-3.5 text-left">
+            <span className={priv ? 'text-accent' : 'text-ink3'}><Locked size={18} /></span>
+            <span className="flex-1">
+              <span className="block text-[15px]">Solo para mí</span>
+              <span className="block text-[12px] text-ink3">{priv ? `${partnerName()} no lo verá` : `«${(wallet?.shared ? wallet : toWallet)?.name}» es compartida: ${partnerName()} lo verá`}</span>
+            </span>
+            <span className={`flex h-[28px] w-[46px] items-center rounded-full p-[3px] transition-colors ${priv ? 'bg-accent' : 'bg-ink/15'}`}>
+              <motion.span layout transition={spring} className={`h-[22px] w-[22px] rounded-full bg-white shadow ${priv ? 'ml-auto' : ''}`} />
+            </span>
+          </Press>
+        )}
 
         {/* Gasto compartido: alguien te debe una parte */}
         {type === 'expense' && isNew && (

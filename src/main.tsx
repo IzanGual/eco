@@ -9,19 +9,18 @@ import { initSync } from './sync';
 import '@fontsource/instrument-serif/400.css';
 import '@fontsource-variable/instrument-sans';
 import './index.css';
+import './install';
 
+// Las versiones nuevas se instalan en segundo plano y se usan la próxima vez que abras la app,
+// en vez de recargar la pantalla nada más abrirla (eso era un segundo arranque completo)
 registerSW({ immediate: true });
 initSync();
-// Firebase pesa: lo cargamos cuando la app ya se ve
-const idle = (window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback ?? ((cb: () => void) => setTimeout(cb, 600));
-idle(() => initCloud().catch(() => {}), { timeout: 1500 });
-import './install';
 
 // Pide al navegador que no borre los datos aunque falte espacio
 navigator.storage?.persist?.().catch(() => {});
 
 async function boot() {
-  if (import.meta.env.DEV && new URLSearchParams(location.search).has('demo')) {
+  if ((import.meta.env.DEV || import.meta.env.VITE_DEMO) && new URLSearchParams(location.search).has('demo')) {
     const { loadDemo } = await import('./demo');
     await loadDemo();
     history.replaceState(null, '', location.pathname);
@@ -37,4 +36,12 @@ boot().finally(() => {
       </DataProvider>
     </StrictMode>
   );
+  // Firebase pesa (~400 KB): se carga cuando la app ya está en pantalla, nunca antes
+  requestAnimationFrame(() => setTimeout(() => initCloud().catch(() => {}), 1200));
+  // Y las pantallas secundarias se dejan precargadas para que abran al instante
+  setTimeout(() => {
+    import('./screens/Stats');
+    import('./screens/Manage');
+    import('./screens/Summary');
+  }, 2500);
 });

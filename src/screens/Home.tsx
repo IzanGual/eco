@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Add, ArrowUpRight, ChevronRight } from '@carbon/icons-react';
+import { Add, ArrowUpRight, ChevronRight, UserMultiple } from '@carbon/icons-react';
 import { addDays, debtSummary, fmt, fromISO, getPeriod, todayISO, totals, walletBalances } from '../lib';
 import { useData } from '../store';
 import { useNav } from '../nav';
@@ -110,7 +110,10 @@ export function Home() {
             const b = balances.get(w.id!) ?? 0;
             return (
               <Press key={w.id} scale={0.96} className="flex w-[150px] shrink-0 flex-col gap-4 rounded-[22px] bg-surface p-4 text-left" onClick={() => nav.push({ name: 'filtered', title: w.name, walletId: w.id })}>
-                <Tile icon={w.icon} color={w.color} size={36} />
+                <div className="flex items-center justify-between">
+                  <Tile icon={w.icon} color={w.color} size={36} />
+                  {w.shared && <span className="flex items-center gap-1 rounded-full bg-accent/10 px-2 py-1 text-[11px] font-semibold text-accent"><UserMultiple size={12} /> Común</span>}
+                </div>
                 <div>
                   <p className="truncate text-[13px] text-ink2">{w.name}</p>
                   <p className={`num text-[22px] leading-tight ${b < 0 ? 'text-accent' : ''}`}>{fmt(b)}</p>
