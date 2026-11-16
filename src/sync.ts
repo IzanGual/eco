@@ -83,8 +83,14 @@ for (const t of SHARED_TABLES) {
 async function isShared(t: SharedTable, rec: Record<string, unknown>) {
   if (t === 'wallets') return !!rec.shared;
   if (rec.private) return false;
-  for (const id of [rec.walletId, rec.toWalletId]) {
-    if (id != null && (await db.wallets.get(id as number))?.shared) return true;
+  return inSharedWallet(rec);
+}
+
+/** ¿Este movimiento o repetición toca alguna cartera compartida de este móvil? */
+async function inSharedWallet(rec: object) {
+  const r = rec as { walletId?: number; toWalletId?: number };
+  for (const id of [r.walletId, r.toWalletId]) {
+    if (id != null && (await db.wallets.get(id))?.shared) return true;
   }
   return false;
 }
@@ -174,6 +180,8 @@ async function listen() {
   if (!house || !me) return;
   const { fs } = await load();
   const { collection, doc, onSnapshot, query, where, Timestamp } = await import('firebase/firestore');
+  await cleanLegacy(house.id, me.uid).catch(() => {});
+  if (!house) return;
   const since = Number(localStorage.getItem(LS_PULL) || 0);
 
   unsubHouse = onSnapshot(doc(fs, 'households', house.id), (snap) => {
@@ -207,7 +215,13 @@ async function listen() {
         const table = db.table(v.t);
         const local = (await table.get(v.id)) as Transaction | undefined;
         if (local?.private) continue; // lo «Solo para mí» nunca se toca desde fuera
+        // Solo se toca lo que es de una cartera compartida: lo personal de cada uno nunca se pisa ni se borra
+        // (y se ignoran los restos de la versión antigua, que lo compartía todo)
+        if (v.t === 'wallets') {
+          if (local && !(local as unknown as Wallet).shared) continue;
+        } else if (local && !(await inSharedWallet(local))) continue;
         if (v.del) {
+          if (!local) continue;
           await table.delete(v.id);
           sent.delete(key);
           if (v.t === 'wallets') {
@@ -219,6 +233,8 @@ async function listen() {
         }
         if (!v.d) continue;
         const rec = JSON.parse(v.d) as Record<string, unknown> & { _cat?: CatRef; _person?: { name: string; color: string } };
+        if (v.t === 'wallets' && !rec.shared) continue;
+        if (v.t !== 'wallets' && (rec.private || !(await inSharedWallet(rec)))) continue;
         if (v.t === 'transactions' || v.t === 'recurring') {
           rec.categoryId = await resolveCat(rec._cat);
           rec.personId = await resolvePerson(rec._person);
@@ -233,6 +249,55 @@ async function listen() {
     saveSent();
     localStorage.setItem(LS_PULL, String(maxU));
   });
+}
+
+// ---------- Limpieza de la versión antigua ----------
+// La primera versión del modo pareja lo compartía todo: al unirse, el móvil de quien se unía se quedaba con
+// una copia de TODAS las carteras de quien creó la conexión, como si fueran suyas. Aquí se quitan de este
+// móvil las carteras que subió la pareja con esa versión y que ahora no están compartidas (con sus
+// movimientos y repeticiones). Lo que la pareja comparta de verdad vuelve a llegar solo.
+// Se hace una vez por conexión y se guarda una copia de lo quitado en Ajustes (clave «legacyBackup»).
+async function cleanLegacy(hid: string, me: string) {
+  const flag = `eco:legacyClean:${hid}`;
+  if (localStorage.getItem(flag)) return;
+  const { fs } = await load();
+  const { collection, getDocs, query, where } = await import('firebase/firestore');
+  const snap = await getDocs(query(collection(fs, 'households', hid, 'docs'), where('t', '==', 'wallets')));
+  // Las carteras con id pequeño (1, 2…) son las de antes de conectar de quien creó la conexión
+  const creator = house?.members[0] === me;
+  const gone = new Set<number>();
+  for (const d of snap.docs) {
+    const v = d.data() as { id: number; d?: string; del?: boolean; by?: string };
+    if (v.del || !v.d) continue;
+    if (v.id < 1e12 ? creator : v.by === me) continue;
+    let rec: { shared?: boolean };
+    try { rec = JSON.parse(v.d); } catch { continue; }
+    if (rec.shared) continue;
+    const local = await db.wallets.get(v.id);
+    if (local && !local.shared) gone.add(v.id);
+  }
+  if (gone.size) {
+    const inGone = (id?: number) => id != null && gone.has(id);
+    // Se quitan los movimientos que solo tocan esas carteras; un traspaso desde/hacia una tuya se queda
+    const only = (r: { walletId: number; toWalletId?: number }) => inGone(r.walletId) && (r.toWalletId == null || inGone(r.toWalletId));
+    await db.transaction('rw', [db.wallets, db.transactions, db.recurring, db.settings], async (tx) => {
+      (tx as unknown as MaybeRemote).remote = true;
+      const wallets = await db.wallets.bulkGet([...gone]);
+      const txs = await db.transactions.filter(only).toArray();
+      const recs = await db.recurring.filter(only).toArray();
+      await db.settings.put({
+        key: 'legacyBackup',
+        value: { at: Date.now(), wallets, recurring: recs, transactions: txs.map(({ photo: _p, ...t }) => t) }
+      });
+      await db.transactions.bulkDelete(txs.map((t) => t.id!));
+      await db.recurring.bulkDelete(recs.map((r) => r.id!));
+      await db.wallets.bulkDelete([...gone]);
+    });
+    if (gone.has(Number(localStorage.getItem('eco:lastWallet')))) localStorage.removeItem('eco:lastWallet');
+    const n = gone.size;
+    import('./components/ui').then((ui) => ui.toast(n === 1 ? `Quitada 1 cartera de ${partnerName() ?? 'tu pareja'} que no está compartida` : `Quitadas ${n} carteras de ${partnerName() ?? 'tu pareja'} que no están compartidas`)).catch(() => {});
+  }
+  localStorage.setItem(flag, '1');
 }
 
 function stopListening() {

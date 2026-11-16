@@ -6,7 +6,8 @@ import { centsToInput, fmt, FREQ_LABEL, nextOccurrence, parseAmount, processRecu
 import { useData } from '../store';
 import { useNav } from '../nav';
 import { useHousehold } from '../useHousehold';
-import { partnerName, setWalletShared } from '../sync';
+import { memberName, partnerName, setWalletShared } from '../sync';
+import { currentUser } from '../cloud';
 import { CatIcon } from '../icons';
 import { ColorPicker, Empty, GlassIconButton, Group, IconPicker, Page, Press, Segmented, Tile, confirmDialog, toast } from '../components/ui';
 
@@ -73,53 +74,62 @@ export function WalletEdit({ id }: { id?: number }) {
   const [name, setName] = useState(w?.name ?? '');
   const [icon, setIcon] = useState(w?.icon ?? 'card');
   const [color, setColor] = useState(w?.color ?? '#4F6D8F');
-  const [initial, setInitial] = useState(w ? centsToInput(Math.abs(w.initialBalance)) : '');
-  const [negative, setNegative] = useState((w?.initialBalance ?? 0) < 0);
+  // Lo que mueven sus movimientos (hasta hoy): el saldo actual es saldo inicial + esto
+  const movements = useMemo(() => (w ? (walletBalances([w], txs).get(w.id!) ?? 0) - w.initialBalance : 0), [w, txs]);
+  const current = (w?.initialBalance ?? 0) + movements;
+  const [initial, setInitial] = useState(w ? centsToInput(Math.abs(current)) : '');
+  const [negative, setNegative] = useState(current < 0);
   const [moveTo, setMoveTo] = useState<number | ''>('');
   const house = useHousehold();
-  const [sharing, setSharing] = useState(false);
-  const partner = partnerName();
+  const me = currentUser()?.uid;
+  const connected = !!house && house.members.length > 1;
+  const partner = partnerName() ?? 'tu pareja';
+  // Compartida por tu pareja: los dos apuntáis en ella, pero solo quien la creó puede dejar de compartirla
+  const theirs = !!w?.shared && !!w.owner && w.owner !== me;
+  const [share, setShare] = useState(!!w?.shared);
+  const [busy, setBusy] = useState(false);
   const others = allWallets.filter((x) => x.id !== id && !x.archived);
   const used = id != null && txs.some((t) => t.walletId === id || t.toWalletId === id);
 
   async function save() {
-    const data = { name: name.trim(), icon, color, initialBalance: parseAmount(initial) * (negative ? -1 : 1) };
-    if (w) await db.wallets.update(w.id!, data);
-    else await db.wallets.add({ ...data, order: Math.max(-1, ...allWallets.map((x) => x.order)) + 1 });
-    toast('Cartera guardada');
-    nav.pop();
-  }
-
-  // Compartir con la pareja: se aplica al momento (no hace falta pulsar Guardar)
-  async function toggleShare() {
-    if (!w) return;
-    const on = !w.shared;
-    const ok = await confirmDialog(on ? `¿Compartir «${w.name}» con ${partner}?` : `¿Dejar de compartir «${w.name}»?`, {
-      message: on
-        ? `${partner} verá esta cartera y todos sus movimientos (también los de antes), y podrá apuntar en ella. Lo que marques «Solo para mí» no lo verá.`
-        : `${partner} dejará de verla y desaparecerá de su móvil. En el tuyo se queda todo.`,
-      confirm: on ? 'Compartir' : 'Dejar de compartir',
-      destructive: !on
-    });
-    if (!ok) return;
-    setSharing(true);
+    // Escribes lo que tienes ahora; el saldo inicial se calcula restando los movimientos
+    const data = { name: name.trim(), icon, color, initialBalance: parseAmount(initial) * (negative ? -1 : 1) - movements };
+    const changeShare = connected && !theirs && share !== !!w?.shared;
+    if (changeShare && !share) {
+      const ok = await confirmDialog(`¿Dejar de compartir «${data.name}»?`, {
+        message: `${partner} dejará de verla y desaparecerá de su móvil. En el tuyo se queda todo.`,
+        confirm: 'Dejar de compartir'
+      });
+      if (!ok) return;
+    }
+    setBusy(true);
     try {
-      await db.wallets.update(w.id!, { name: name.trim() || w.name, icon, color });
-      await setWalletShared(w.id!, on);
-      toast(on ? `Compartida con ${partner}` : 'Ya no se comparte');
+      let wid = w?.id;
+      if (w) await db.wallets.update(w.id!, data);
+      else wid = await db.wallets.add({ ...data, order: Math.max(-1, ...allWallets.map((x) => x.order)) + 1 });
+      if (changeShare) await setWalletShared(wid!, share);
+      toast(changeShare ? (share ? `Cartera compartida con ${partner}` : 'Cartera guardada · ya no se comparte') : 'Cartera guardada');
       nav.pop();
     } catch (e) {
       alert((e as Error).message);
     } finally {
-      setSharing(false);
+      setBusy(false);
     }
   }
 
   async function remove() {
-    if (used && moveTo === '') return alert('Elige primero a qué cartera pasar sus movimientos, o archívala.');
-    if (!(await confirmDialog('¿Eliminar esta cartera?', { message: used ? 'Sus movimientos pasarán a la cartera elegida.' : undefined }))) return;
+    if (used && moveTo === '') return alert('Elige primero qué hacer con sus movimientos, o archívala.');
+    const wipe = moveTo === -1;
+    const msg = [
+      used ? (wipe ? 'Se borrarán también todos sus movimientos.' : 'Sus movimientos pasarán a la cartera elegida.') : '',
+      w?.shared ? `Está compartida: también desaparecerá del móvil de ${partner}.` : ''
+    ].filter(Boolean).join(' ');
+    if (!(await confirmDialog('¿Eliminar esta cartera?', { message: msg || undefined }))) return;
     await db.transaction('rw', db.wallets, db.transactions, db.recurring, async () => {
-      if (used) {
+      if (used && wipe) {
+        await db.transactions.filter((t) => t.walletId === id || t.toWalletId === id).delete();
+        await db.recurring.filter((r) => r.walletId === id || r.toWalletId === id).delete();
+      } else if (used) {
         const target = Number(moveTo);
         await db.transactions.where('walletId').equals(id!).modify({ walletId: target });
         await db.transactions.where('toWalletId').equals(id!).modify({ toWalletId: target });
@@ -133,7 +143,7 @@ export function WalletEdit({ id }: { id?: number }) {
   }
 
   return (
-    <Page title={w ? w.name : 'Nueva cartera'} onBack={nav.pop} footer={<Press className="btn-ink w-full disabled:opacity-30" disabled={!name.trim()} onClick={save}>Guardar</Press>}>
+    <Page title={w ? w.name : 'Nueva cartera'} onBack={nav.pop} footer={<Press className="btn-ink w-full disabled:opacity-30" disabled={!name.trim() || busy} onClick={save}>{busy ? 'Guardando…' : 'Guardar'}</Press>}>
       <div className="flex justify-center pb-4">
         <motion.span key={icon + color} initial={{ scale: 0.7, rotate: -10 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 400, damping: 15 }}>
           <Tile icon={icon} color={color} size={76} />
@@ -141,17 +151,27 @@ export function WalletEdit({ id }: { id?: number }) {
       </div>
       <p className="eyebrow px-1 pb-2">Nombre</p>
       <input className="field" placeholder="Cuenta ahorro" value={name} onChange={(e) => setName(e.target.value)} />
-      {w && (house && house.members.length > 1 ? (
-        <Press scale={0.99} disabled={sharing} onClick={toggleShare} className="mt-3 flex w-full items-center gap-3 rounded-[22px] bg-surface px-4 py-3.5 text-left">
-          <span className={w.shared ? 'text-accent' : 'text-ink3'}><UserMultiple size={18} /></span>
-          <span className="flex-1">
-            <span className="block text-[15px] font-medium">Compartida con {partner}</span>
-            <span className="block text-[12px] text-ink3">{w.shared ? `${partner} ve esta cartera y apunta en ella` : 'Solo la ves tú'}</span>
-          </span>
-          <span className={`flex h-[28px] w-[46px] items-center rounded-full p-[3px] transition-colors ${w.shared ? 'bg-accent' : 'bg-ink/15'}`}>
-            <motion.span layout className={`h-[22px] w-[22px] rounded-full bg-white shadow ${w.shared ? 'ml-auto' : ''}`} />
-          </span>
-        </Press>
+      {connected ? (
+        theirs ? (
+          <div className="mt-3 flex w-full items-center gap-3 rounded-[22px] bg-surface px-4 py-3.5">
+            <span className="text-accent"><UserMultiple size={18} /></span>
+            <span className="flex-1">
+              <span className="block text-[15px] font-medium">Compartida por {memberName(w!.owner) ?? partner}</span>
+              <span className="block text-[12px] text-ink3">Los dos la veis y apuntáis en ella</span>
+            </span>
+          </div>
+        ) : (
+          <Press scale={0.99} disabled={busy} onClick={() => setShare((v) => !v)} className="mt-3 flex w-full items-center gap-3 rounded-[22px] bg-surface px-4 py-3.5 text-left">
+            <span className={share ? 'text-accent' : 'text-ink3'}><UserMultiple size={18} /></span>
+            <span className="flex-1">
+              <span className="block text-[15px] font-medium">Compartida con {partner}</span>
+              <span className="block text-[12px] text-ink3">{share ? `${partner} la verá con todos sus movimientos y podrá apuntar en ella` : 'Solo la ves tú'}</span>
+            </span>
+            <span className={`flex h-[28px] w-[46px] items-center rounded-full p-[3px] transition-colors ${share ? 'bg-accent' : 'bg-ink/15'}`}>
+              <motion.span layout className={`h-[22px] w-[22px] rounded-full bg-white shadow ${share ? 'ml-auto' : ''}`} />
+            </span>
+          </Press>
+        )
       ) : (
         <Press scale={0.99} onClick={() => nav.push({ name: 'couple' })} className="mt-3 flex w-full items-center gap-3 rounded-[22px] bg-surface px-4 py-3.5 text-left">
           <span className="text-ink3"><UserMultiple size={18} /></span>
@@ -161,13 +181,14 @@ export function WalletEdit({ id }: { id?: number }) {
           </span>
           <ChevronRight size={16} className="text-ink3" />
         </Press>
-      ))}
+      )}
 
-      <p className="eyebrow px-1 pb-2 pt-6">Saldo antes de empezar a apuntar</p>
+      <p className="eyebrow px-1 pb-2 pt-6">¿Cuánto hay ahora en esta cartera?</p>
       <div className="flex gap-2">
         <Press scale={0.9} className="btn-soft w-14 px-0 text-[20px]" onClick={() => setNegative((v) => !v)}>{negative ? '−' : '+'}</Press>
         <input className="field font-serif text-[22px]" inputMode="decimal" placeholder="0" value={initial} onChange={(e) => setInitial(e.target.value.replace(/[^\d.,]/g, ''))} />
       </div>
+      <p className="px-1 pt-2 text-[13px] text-ink3">Mira tu banco (o cuenta el efectivo) y escribe lo que hay hoy. Eco ajusta el resto para que cuadre con tus movimientos.</p>
       <p className="eyebrow px-1 pb-3 pt-6">Color</p>
       <ColorPicker value={color} onChange={setColor} />
       <p className="eyebrow px-1 pb-2 pt-6">Icono</p>
@@ -180,8 +201,9 @@ export function WalletEdit({ id }: { id?: number }) {
           </Press>
           {used && (
             <select className="field" value={moveTo} onChange={(e) => setMoveTo(e.target.value ? Number(e.target.value) : '')}>
-              <option value="">Al eliminar, pasar sus movimientos a…</option>
-              {others.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              <option value="">Al eliminar, sus movimientos…</option>
+              {others.map((o) => <option key={o.id} value={o.id}>Pasarlos a {o.name}</option>)}
+              <option value={-1}>Borrarlos también</option>
             </select>
           )}
           <Press scale={0.98} className="btn-danger w-full" onClick={remove}>Eliminar cartera</Press>
