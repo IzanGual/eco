@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Add, ChevronDown, ChevronRight, ChevronUp, TrashCan, UserMultiple } from '@carbon/icons-react';
-import { db, type CatType } from '../db';
-import { centsToInput, fmt, FREQ_LABEL, nextOccurrence, parseAmount, shortDate, todayISO, walletBalances } from '../lib';
+import { db, type CatType, type Frequency } from '../db';
+import { centsToInput, fmt, FREQ_LABEL, nextOccurrence, parseAmount, processRecurring, shortDate, todayISO, walletBalances } from '../lib';
 import { useData } from '../store';
 import { useNav } from '../nav';
 import { useHousehold } from '../useHousehold';
@@ -317,13 +317,6 @@ export function RecurringList() {
       await db.recurring.delete(id);
     });
   }
-  async function editAmount(id: number, current: number) {
-    const v = prompt('Nuevo importe para los próximos', centsToInput(current));
-    if (v == null) return;
-    const cents = parseAmount(v);
-    if (cents > 0) await db.recurring.update(id, { amount: cents });
-  }
-
   return (
     <Page title="Repeticiones" onBack={nav.pop} right={<GlassIconButton onClick={() => nav.push({ name: 'editor', repeat: 'monthly' })} label="Nueva repetición"><Add size={22} /></GlassIconButton>}>
       {sorted.length === 0 ? (
@@ -339,16 +332,17 @@ export function RecurringList() {
           const c = r.categoryId != null ? catMap.get(r.categoryId) : undefined;
           return (
             <motion.div layout key={r.id} className={`rounded-[22px] bg-surface p-4 transition-opacity ${r.active ? '' : 'opacity-55'}`}>
-              <div className="flex items-center gap-3.5">
+              <Press scale={0.98} className="flex w-full items-center gap-3.5 text-left" onClick={() => nav.push({ name: 'recurringEdit', id: r.id! })} aria-label="Editar repetición">
                 <Tile icon={c?.icon ?? 'repeat'} color={c?.color ?? '#6B6760'} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[16px] font-medium">{r.note || c?.name || `${walletMap.get(r.walletId)?.name} → ${walletMap.get(r.toWalletId!)?.name}`}</p>
-                  <p className="text-[13px] text-ink3">{FREQ_LABEL[r.frequency]} · {r.active ? `próximo ${shortDate(r.nextDate)}` : 'en pausa'}</p>
+                  <p className="truncate text-[13px] text-ink3">{FREQ_LABEL[r.frequency]} · {r.active ? `próximo ${shortDate(r.nextDate)}` : 'en pausa'}</p>
                 </div>
-                <Press scale={0.9} className={`num text-[20px] ${r.type === 'income' ? 'text-pos' : ''}`} onClick={() => editAmount(r.id!, r.amount)}>
+                <span className={`num text-[20px] ${r.type === 'income' ? 'text-pos' : ''}`}>
                   {r.type === 'income' ? '+' : r.type === 'expense' ? '−' : ''}{fmt(r.amount)}
-                </Press>
-              </div>
+                </span>
+                <ChevronRight size={18} className="shrink-0 text-ink3" />
+              </Press>
               <div className="mt-3.5 flex gap-2">
                 <Press scale={0.96} className="btn-soft flex-1 py-2.5 text-[14px]" onClick={() => toggle(r.id!, !r.active)}>{r.active ? 'Pausar' : 'Reanudar'}</Press>
                 <Press scale={0.96} className="btn-danger flex-1 py-2.5 text-[14px]" onClick={() => remove(r.id!)}>Eliminar</Press>
@@ -357,6 +351,119 @@ export function RecurringList() {
           );
         })}
       </div>
+    </Page>
+  );
+}
+
+// ================= Editar una repetición =================
+const FREQ_ORDER: Frequency[] = ['daily', 'weekly', 'monthly', 'yearly'];
+const FREQ_SHORT: Record<Frequency, string> = { daily: 'Día', weekly: 'Semana', monthly: 'Mes', yearly: 'Año' };
+
+export function RecurringEdit({ id }: { id: number }) {
+  const { recurring, categories, allWallets, txs } = useData();
+  const nav = useNav();
+  const r = recurring.find((x) => x.id === id);
+  const [note, setNote] = useState(r?.note ?? '');
+  const [amount, setAmount] = useState(r ? centsToInput(r.amount) : '');
+  const [categoryId, setCategoryId] = useState<number | undefined>(r?.categoryId);
+  const [walletId, setWalletId] = useState<number | undefined>(r?.walletId);
+  const [toWalletId, setToWalletId] = useState<number | undefined>(r?.toWalletId);
+  const [frequency, setFrequency] = useState<Frequency>(r?.frequency ?? 'monthly');
+  const [nextDate, setNextDate] = useState(r?.nextDate ?? todayISO());
+  const [past, setPast] = useState(false);
+  const created = useMemo(() => txs.filter((t) => t.recurringId === id).length, [txs, id]);
+
+  if (!r) {
+    return (
+      <Page title="Repetición" onBack={nav.pop}>
+        <Empty icon="repeat" title="Esta repetición ya no existe" />
+      </Page>
+    );
+  }
+  const isTransfer = r.type === 'transfer';
+  const catType = r.type === 'income' ? 'income' : 'expense';
+  const cats = categories.filter((c) => c.type === catType);
+  const parents = cats.filter((c) => c.parentId == null);
+  const wallets = allWallets.filter((w) => !w.archived || w.id === r.walletId || w.id === r.toWalletId);
+  const cents = parseAmount(amount);
+  const valid = cents > 0 && walletId != null && (!isTransfer || (toWalletId != null && toWalletId !== walletId)) && !!nextDate;
+
+  async function save() {
+    if (!valid || !r) return;
+    const data = {
+      note: note.trim(),
+      amount: cents,
+      categoryId: isTransfer ? undefined : categoryId,
+      walletId: walletId!,
+      toWalletId: isTransfer ? toWalletId : undefined,
+      frequency,
+      nextDate
+    };
+    await db.transaction('rw', db.recurring, db.transactions, async () => {
+      await db.recurring.update(id, data);
+      // Opcional: corregir también los movimientos ya creados (concepto, categoría y cartera; el importe de los pasados no se toca)
+      if (past) {
+        await db.transactions.where('recurringId').equals(id).modify({ note: data.note, categoryId: data.categoryId, walletId: data.walletId, toWalletId: data.toWalletId });
+      }
+    });
+    // Si la próxima fecha ya ha pasado, se crean ahora los que tocaban
+    if (r.active && nextDate <= todayISO()) await processRecurring();
+    toast('Repetición guardada');
+    nav.pop();
+  }
+
+  return (
+    <Page title="Editar repetición" onBack={nav.pop} footer={<Press className="btn-ink w-full disabled:opacity-30" disabled={!valid} onClick={save}>Guardar cambios</Press>}>
+      <p className="eyebrow px-1 pb-2">Concepto</p>
+      <input className="field" placeholder="Alquiler, Netflix, nómina…" value={note} onChange={(e) => setNote(e.target.value)} />
+
+      <p className="eyebrow px-1 pb-2 pt-6">Importe</p>
+      <input className="field font-serif text-[22px]" inputMode="decimal" placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d.,]/g, ''))} />
+
+      {!isTransfer && (
+        <>
+          <p className="eyebrow px-1 pb-2 pt-6">Categoría</p>
+          <select className="field" value={categoryId ?? ''} onChange={(e) => setCategoryId(e.target.value ? Number(e.target.value) : undefined)}>
+            <option value="">Sin categoría</option>
+            {parents.map((p) => [
+              <option key={p.id} value={p.id}>{p.name}</option>,
+              ...cats.filter((c) => c.parentId === p.id).map((c) => <option key={c.id} value={c.id}>{`${p.name} › ${c.name}`}</option>)
+            ])}
+          </select>
+        </>
+      )}
+
+      <p className="eyebrow px-1 pb-2 pt-6">{isTransfer ? 'Desde' : 'Cartera'}</p>
+      <select className="field" value={walletId ?? ''} onChange={(e) => setWalletId(Number(e.target.value))}>
+        {wallets.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+      </select>
+      {isTransfer && (
+        <>
+          <p className="eyebrow px-1 pb-2 pt-6">Hacia</p>
+          <select className="field" value={toWalletId ?? ''} onChange={(e) => setToWalletId(Number(e.target.value))}>
+            {wallets.filter((w) => w.id !== walletId).map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+          </select>
+        </>
+      )}
+
+      <p className="eyebrow px-1 pb-2 pt-6">Se repite cada</p>
+      <Segmented id="freq" value={frequency} onChange={setFrequency} options={FREQ_ORDER.map((f) => ({ value: f, label: FREQ_SHORT[f] }))} />
+
+      <p className="eyebrow px-1 pb-2 pt-6">Próxima vez</p>
+      <input className="field" type="date" value={nextDate} onChange={(e) => e.target.value && setNextDate(e.target.value)} />
+      <p className="px-1 pt-2 text-[13px] text-ink3">Desde esa fecha se crea uno {FREQ_LABEL[frequency].toLowerCase()}. Los cambios valen para los próximos.</p>
+
+      {created > 0 && (
+        <Press scale={0.99} onClick={() => setPast((v) => !v)} className="mt-6 flex w-full items-center gap-3 rounded-[22px] bg-surface px-4 py-3.5 text-left">
+          <span className="flex-1">
+            <span className="block text-[15px] font-medium">Cambiar también {created === 1 ? 'el ya creado' : `los ${created} ya creados`}</span>
+            <span className="block text-[12px] text-ink3">Concepto, categoría y cartera. El importe de los pasados no se toca.</span>
+          </span>
+          <span className={`flex h-[28px] w-[46px] items-center rounded-full p-[3px] transition-colors ${past ? 'bg-accent' : 'bg-ink/15'}`}>
+            <motion.span layout className={`h-[22px] w-[22px] rounded-full bg-white shadow ${past ? 'ml-auto' : ''}`} />
+          </span>
+        </Press>
+      )}
     </Page>
   );
 }

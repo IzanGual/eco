@@ -413,7 +413,7 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
             </label>
           </div>
           {type !== 'debt' && (rec ? (
-            <Row icon={<Repeat size={18} />} label="Se repite" onClick={() => nav.push({ name: 'recurring' })}>{rec.active ? FREQ_LABEL[rec.frequency] : 'En pausa'}</Row>
+            <Row icon={<Repeat size={18} />} label="Se repite" onClick={() => nav.push({ name: 'recurringEdit', id: rec.id! })}>{rec.active ? FREQ_LABEL[rec.frequency] : 'En pausa'}</Row>
           ) : (
             <Row icon={<Repeat size={18} />} label="Repetir" onClick={() => setSheet('repeat')}>
               <span className={repeat ? 'text-accent' : 'text-ink3'}>{repeat ? FREQ_LABEL[repeat] : 'No se repite'}</span>

@@ -26,6 +26,7 @@ const WalletEdit = lazy(() => import('./screens/Manage').then((m) => ({ default:
 const Categories = lazy(() => import('./screens/Manage').then((m) => ({ default: m.Categories })));
 const CategoryEdit = lazy(() => import('./screens/Manage').then((m) => ({ default: m.CategoryEdit })));
 const RecurringList = lazy(() => import('./screens/Manage').then((m) => ({ default: m.RecurringList })));
+const RecurringEdit = lazy(() => import('./screens/Manage').then((m) => ({ default: m.RecurringEdit })));
 import { useRef } from 'react';
 import type { TxType } from './db';
 
@@ -169,6 +170,7 @@ function ScreenView({ s }: { s: Screen }) {
     case 'budgets': return <Budgets />;
     case 'budgetEdit': return <BudgetEdit id={s.id} />;
     case 'recurring': return <RecurringList />;
+    case 'recurringEdit': return <RecurringEdit id={s.id} />;
     case 'summary': return <Summary kind={s.kind} offset={s.offset} />;
     case 'people': return <People />;
     case 'person': return <PersonDetail id={s.id} />;

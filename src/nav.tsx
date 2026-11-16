@@ -10,6 +10,7 @@ export type Screen =
   | { name: 'budgets' }
   | { name: 'budgetEdit'; id?: number }
   | { name: 'recurring' }
+  | { name: 'recurringEdit'; id: number }
   | { name: 'people' }
   | { name: 'person'; id: number }
   | { name: 'import' }
