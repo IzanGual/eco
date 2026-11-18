@@ -160,6 +160,10 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
   const cents = evaluate(expr);
   const share = shareOn ? (shareExpr === 'half' ? Math.round(cents / 2) : parseAmount(shareExpr)) : 0;
   const amountRef = useRef<HTMLInputElement>(null);
+  const noteRef = useRef<HTMLInputElement>(null);
+  // Tras elegir la categoría definitiva saltamos a la nota (dentro del toque, para que el móvil abra el teclado)
+  const focusNote = () => { if (!note.trim()) noteRef.current?.focus(); };
+  const pickCategory = (id: number) => { setCategoryId(id); focusNote(); };
   // El teclado del móvil ya viene abierto desde el botón + (ver focusKeyboard): pasamos el foco al importe
   useEffect(() => {
     if (isNew && !expr) amountRef.current?.focus({ preventScroll: true });
@@ -302,7 +306,11 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
               {gridCats.map((c) => {
                 const on = categoryId === c.id || selected?.parentId === c.id;
                 return (
-                  <Press key={c.id} scale={0.88} onClick={() => { setCategoryId(c.id); amountRef.current?.blur(); }} className="flex min-w-0 flex-col items-center gap-1.5">
+                  <Press key={c.id} scale={0.88} onClick={() => {
+                      // Con subcategorías esperamos a que elija una; sin ellas, ya está: a la nota
+                      if (categories.some((s) => s.parentId === c.id)) { setCategoryId(c.id); amountRef.current?.blur(); }
+                      else pickCategory(c.id!);
+                    }} className="flex min-w-0 flex-col items-center gap-1.5">
                     <Tile icon={c.icon} color={c.color} size={52} active={on} />
                     <span className={`line-clamp-2 w-full text-center text-[12px] leading-tight ${on ? 'font-semibold text-ink' : 'text-ink2'}`}>{c.name}</span>
                   </Press>
@@ -313,7 +321,7 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
                 <span className="text-[12px] text-ink3">Nueva</span>
               </Press>
             </div>
-            {subParent && <SubcategoryBar key={subParent.id} parent={subParent} subs={subs} value={categoryId} onPick={setCategoryId} />}
+            {subParent && <SubcategoryBar key={subParent.id} parent={subParent} subs={subs} value={categoryId} onPick={pickCategory} />}
           </>
         )}
 
@@ -351,14 +359,16 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
           </>
         )}
 
-        {/* Detalles: nota primero (es lo que más se usa), luego cuenta, fecha y repetir */}
-        <div className="divide-hair mt-4 overflow-hidden rounded-[22px] bg-surface">
+        {/* Nota: bloque propio y bien visible (se usa casi siempre) */}
+        <div className="px-1 pb-2.5 pt-5 text-[15px] font-semibold">Nota</div>
+        <div className="overflow-hidden rounded-[22px] bg-surface ring-accent/60 transition-shadow focus-within:ring-2">
           <div className="flex items-center gap-3 px-4">
-            <span className="text-ink3"><Edit size={18} /></span>
+            <span className={note ? 'text-accent' : 'text-ink3'}><Edit size={20} /></span>
             <input
+              ref={noteRef}
               type="text"
-              className="min-w-0 flex-1 bg-transparent py-3 text-[16px] outline-none placeholder:text-ink3"
-              placeholder="Nota: Mercadona, cena con Laura…"
+              className="min-w-0 flex-1 bg-transparent py-4 text-[17px] outline-none placeholder:text-ink3"
+              placeholder="Mercadona, cena con Laura…"
               value={note}
               onChange={(e) => { noteTouched.current = true; setNote(e.target.value); }}
               enterKeyHint="done"
@@ -381,6 +391,10 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
               </motion.div>
             )}
           </AnimatePresence>
+        </div>
+
+        {/* Detalles: cuenta, fecha, repetir y foto */}
+        <div className="divide-hair mt-4 overflow-hidden rounded-[22px] bg-surface">
           {type !== 'transfer' && (
             <div className="flex items-center gap-3 py-2 pl-4">
               <span className="text-ink3"><WalletIcon size={18} /></span>
@@ -501,7 +515,7 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
       {/* Hojas de selección */}
       <AnimatePresence>
         {sheet === 'category' && (
-          <CategorySheet key="cat" type={catType} value={categoryId} onPick={(c) => { setCategoryId(c); setSheet(null); }} onClose={() => setSheet(null)} />
+          <CategorySheet key="cat" type={catType} value={categoryId} onPick={(c) => { setSheet(null); pickCategory(c); }} onClose={() => setSheet(null)} />
         )}
         {(sheet === 'person' || sheet === 'sharePerson') && (
           <PersonSheet key="person" value={sheet === 'person' ? personId : sharePerson} onPick={(p) => { if (sheet === 'person') setPersonId(p); else setSharePerson(p); setSheet(null); }} onClose={() => setSheet(null)} people={people} />
