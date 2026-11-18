@@ -45,10 +45,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
       document.documentElement.classList.toggle('dark', dark);
       document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#12110f' : '#f2eee6');
     };
+    // index.html lo lee antes de pintar el primer frame
+    if (settingRows) try { localStorage.setItem('eco:theme', settings.theme); } catch { /* sin almacenamiento */ }
     apply();
     mq.addEventListener('change', apply);
     return () => mq.removeEventListener('change', apply);
-  }, [settings.theme]);
+  }, [settings.theme, !!settingRows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Modo privacidad: difumina las cifras
   useEffect(() => {
@@ -79,6 +81,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
     if (firstLoad.current) { firstLoad.current = false; return; }
     scheduleBackup();
   }, [value]);
+
+  // Con los datos ya pintados, la capa de arranque de index.html se desvanece encima de la app
+  const ready = !!value;
+  useEffect(() => {
+    if (!ready) return;
+    const boot = document.getElementById('boot');
+    if (!boot) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      boot.classList.add('out');
+      setTimeout(() => boot.remove(), 400);
+    }));
+  }, [ready]);
 
   if (!value) return <div className="min-h-dvh bg-paper" />;
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -50,14 +50,18 @@ export function Summary({ kind, offset }: { kind: 'week' | 'month'; offset: numb
     const debts = debtSummary(txs, end);
     const bal = walletBalances(wallets, txs, end);
     const money = wallets.reduce((a, w) => a + (bal.get(w.id!) ?? 0), 0);
-    return { debts, money, p, tt, tp, days, maxDay, zeroDays, elapsed, cats, biggest, count: inP.length, partial: end < p.end };
+    // Una semana sola casi nunca tiene nómina: el balance semanal se mide sobre el mes en curso hasta esa semana
+    const month = getPeriod('month', 0, settings.monthStartDay, end);
+    const balance = kind === 'week' ? totals(txs.filter((t) => t.date >= month.start && t.date <= end)) : tt;
+    return { debts, money, balance, p, tt, tp, days, maxDay, zeroDays, elapsed, cats, biggest, count: inP.length, partial: end < p.end };
   }, [txs, catMap, kind, offset, settings.monthStartDay, today, wallets]);
 
   const { p, tt, tp, days, maxDay, zeroDays, elapsed, cats, biggest } = data;
   const diff = tp.expense ? (tt.expense - tp.expense) / tp.expense : null;
   const unit = kind === 'week' ? 'semana' : 'mes';
   const maxV = Math.max(1, ...days.map((d) => d.v));
-  const saved = tt.income - tt.expense;
+  const bt = data.balance;
+  const saved = bt.income - bt.expense;
 
   const slides: ReactNode[] = [];
   if (tt.expense === 0 && tt.income === 0) {
@@ -171,16 +175,20 @@ export function Summary({ kind, offset }: { kind: 'week' | 'month'; offset: numb
     );
 
     slides.push(
-      <Slide key="end" eyebrow={`Balance del ${unit}`}>
-        <Title>{saved >= 0 ? 'Te quedaste con' : 'Gastaste más de lo que entró'}</Title>
+      <Slide key="end" eyebrow={kind === 'week' ? 'En lo que va de mes' : `Balance del ${unit}`}>
+        <Title>
+          {kind === 'week'
+            ? (saved >= 0 ? 'Este mes vas en positivo' : 'Este mes, de momento, sale más de lo que entra')
+            : (saved >= 0 ? 'Te quedaste con' : 'Gastaste más de lo que entró')}
+        </Title>
         <BigAmount cents={Math.abs(saved)} className={`mt-2 block text-[72px] ${saved >= 0 ? 'text-pos' : 'text-accent'}`} />
         <Reveal delay={0.6}>
           <div className="mt-8 grid grid-cols-2 gap-3">
-            <div className="rounded-[20px] bg-paper/10 p-4"><p className="text-[13px] opacity-60">Entró</p><p className="num text-[26px]">{fmt(tt.income, { compact: true })}</p></div>
-            <div className="rounded-[20px] bg-paper/10 p-4"><p className="text-[13px] opacity-60">Salió</p><p className="num text-[26px]">{fmt(tt.expense, { compact: true })}</p></div>
+            <div className="rounded-[20px] bg-paper/10 p-4"><p className="text-[13px] opacity-60">Entró</p><p className="num text-[26px]">{fmt(bt.income, { compact: true })}</p></div>
+            <div className="rounded-[20px] bg-paper/10 p-4"><p className="text-[13px] opacity-60">Salió</p><p className="num text-[26px]">{fmt(bt.expense, { compact: true })}</p></div>
           </div>
         </Reveal>
-        {tt.income > 0 && saved > 0 && <Reveal delay={0.9}><Text>Has ahorrado el {Math.round((saved / tt.income) * 100)} % de lo que entró.</Text></Reveal>}
+        {bt.income > 0 && saved > 0 && <Reveal delay={0.9}><Text>{kind === 'week' ? 'Llevas ahorrado' : 'Has ahorrado'} el {Math.round((saved / bt.income) * 100)} % de lo que entró.</Text></Reveal>}
         {(data.debts.owedToMe > 0 || data.debts.iOwe > 0) && (
           <Reveal delay={1}>
             <div className="mt-6 rounded-[20px] bg-paper/10 p-4 text-[15px] leading-relaxed">
