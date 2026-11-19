@@ -15,7 +15,7 @@ Funciones planificadas: [FUNCIONES.md](FUNCIONES.md).
 - Mes de nómina a nómina (el mes puede empezar cualquier día)
 - Exportar a CSV (Excel), copia de seguridad y restaurarla
 - Modo claro («Papel») y oscuro («Tinta»), y modo privacidad que difumina las cifras
-- Préstamos con personas («Mamá te debe 150 €»), sin contar como gasto ni ingreso, y gastos compartidos («alguien te debe una parte»)
+- Préstamos con personas («Mamá te debe 150 €»), sin contar como gasto ni ingreso, y gastos que no son (todo) tuyos: «¿De quién es este gasto?» → a medias, una parte o «Me lo deben todo»
 - Resúmenes semanales y mensuales en formato historia
 - Importar CSV desde Soldi, Excel o el banco (detecta columnas, crea categorías y salta duplicados)
 

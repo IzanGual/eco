@@ -7,6 +7,8 @@ const base = process.env.GITHUB_PAGES ? '/eco/' : '/';
 
 export default defineConfig({
   base,
+  // Versión = fecha y hora de publicación (UTC): se ve en Ajustes y en «En pareja»
+  define: { __APP_VERSION__: JSON.stringify(new Date().toISOString().slice(0, 16)) },
   plugins: [
     react(),
     VitePWA({

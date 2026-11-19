@@ -15,6 +15,12 @@ import { GlassIconButton, Press, Segmented, Sheet, Tile, confirmDialog, spring, 
 
 const LAST_WALLET = 'eco:lastWallet';
 
+type Split = 'mine' | 'half' | 'part' | 'all';
+const SPLITS: [Split, string][] = [['mine', 'Todo mío'], ['half', 'A medias'], ['part', 'Una parte'], ['all', 'Me lo deben todo']];
+
+/** Cierra el teclado del móvil (quita el foco del campo en el que se escribe). */
+const blurActive = () => (document.activeElement as HTMLElement | null)?.blur?.();
+
 // ---------- Calculadora: "12,5+3−1" ----------
 function evaluate(expr: string): number {
   const parts = expr.match(/[+−]?[^+−]+/g) ?? [];
@@ -51,7 +57,8 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
   const [recurringId, setRecurringId] = useState<number | undefined>();
   const [personId, setPersonId] = useState<number | undefined>(defaults?.personId);
   const [dir, setDir] = useState<DebtDir>(defaults?.dir ?? 'out');
-  const [shareOn, setShareOn] = useState(false);
+  // ¿De quién es el gasto? Todo tuyo, a medias, una parte o todo de otra persona (entonces es un préstamo)
+  const [split, setSplit] = useState<Split>('mine');
   const [priv, setPriv] = useState(false);
   const house = useHousehold();
   const [sharePerson, setSharePerson] = useState<number | undefined>();
@@ -61,6 +68,7 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
   const [viewPhoto, setViewPhoto] = useState(false);
   const [shake, setShake] = useState(0);
   const noteTouched = useRef(false);
+  const touchY = useRef(0);
 
   useEffect(() => {
     if (isNew) return;
@@ -158,12 +166,27 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
   }, [txs, wallets, walletId]);
 
   const cents = evaluate(expr);
-  const share = shareOn ? (shareExpr === 'half' ? Math.round(cents / 2) : parseAmount(shareExpr)) : 0;
+  const splitting = type === 'expense' && isNew && split !== 'mine';
+  const share = !splitting ? 0 : split === 'half' ? Math.round(cents / 2) : split === 'all' ? cents : parseAmount(shareExpr);
+  // Si te lo deben todo, no es un gasto tuyo: se guarda como préstamo a esa persona
+  const allOwed = splitting && cents > 0 && share >= cents;
   const amountRef = useRef<HTMLInputElement>(null);
-  const noteRef = useRef<HTMLInputElement>(null);
-  // Tras elegir la categoría definitiva saltamos a la nota (dentro del toque, para que el móvil abra el teclado)
-  const focusNote = () => { if (!note.trim()) noteRef.current?.focus(); };
-  const pickCategory = (id: number) => { setCategoryId(id); focusNote(); };
+  // Al elegir categoría se cierra el teclado: así se ve todo lo de debajo (la nota se toca si se quiere)
+  const pickCategory = (id: number) => { setCategoryId(id); blurActive(); };
+
+  // Personas a las que sueles prestar o que te deben, para elegir de un toque
+  const quickPeople = useMemo(() => {
+    const ids: number[] = [];
+    for (const t of txs) {
+      if (t.personId != null && !ids.includes(t.personId)) ids.push(t.personId);
+      if (ids.length >= 6) break;
+    }
+    const list = ids.map((i) => personMap.get(i)).filter((p) => p && !p.archived) as typeof people;
+    for (const p of people) if (!p.archived && !list.includes(p) && list.length < 6) list.push(p);
+    const cur = sharePerson != null ? personMap.get(sharePerson) : undefined;
+    if (cur && !list.includes(cur)) list.unshift(cur);
+    return list;
+  }, [txs, people, personMap, sharePerson]);
   // El teclado del móvil ya viene abierto desde el botón + (ver focusKeyboard): pasamos el foco al importe
   useEffect(() => {
     if (isNew && !expr) amountRef.current?.focus({ preventScroll: true });
@@ -173,21 +196,35 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
     cents <= 0 ? 'Escribe el importe'
     : type === 'transfer' ? (toWalletId == null || toWalletId === walletId ? 'Elige a qué cartera va' : '')
     : type === 'debt' ? (personId == null ? 'Elige con quién' : '')
-    : categoryId == null ? 'Elige una categoría'
-    : shareOn && (sharePerson == null || share <= 0 || share >= cents) ? 'Revisa la parte compartida'
+    : splitting && sharePerson == null ? '¿Quién te lo debe?'
+    : splitting && share <= 0 ? 'Escribe cuánto te debe'
+    : categoryId == null && !allOwed ? 'Elige una categoría'
     : '';
   const valid = !missing && walletId != null;
 
   async function save() {
     if (!valid) {
       setShake((s) => s + 1);
-      if (cents > 0 && type !== 'transfer' && type !== 'debt' && categoryId == null) setSheet('category');
+      if (cents > 0 && splitting && sharePerson == null) setSheet('sharePerson');
+      else if (cents > 0 && type !== 'transfer' && type !== 'debt' && categoryId == null && !allOwed) setSheet('category');
       if (cents > 0 && type === 'debt' && personId == null) setSheet('person');
       return;
     }
-    const tx: Transaction = {
+    const tx: Transaction = allOwed ? {
+      // Todo lo debe otra persona: préstamo (no cuenta como gasto tuyo); la categoría queda en la nota
+      type: 'debt',
+      dir: 'out',
+      personId: sharePerson,
+      amount: cents,
+      walletId: walletId!,
+      date,
+      note: note.trim() || selected?.name || '',
+      photo,
+      private: priv || undefined,
+      createdAt: Date.now()
+    } : {
       type,
-      amount: shareOn ? cents - share : cents,
+      amount: splitting ? cents - share : cents,
       walletId: walletId!,
       toWalletId: type === 'transfer' ? toWalletId : undefined,
       categoryId: type === 'transfer' || type === 'debt' ? undefined : categoryId,
@@ -207,14 +244,14 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
         tx.recurringId = await db.recurring.add({ ...tpl, frequency: repeat, nextDate: nextOccurrence(date, repeat), active: true });
       }
       await db.transactions.add(tx);
-      if (shareOn && sharePerson != null) {
+      if (splitting && !allOwed && sharePerson != null) {
         await db.transactions.add({
           type: 'debt', dir: 'out', personId: sharePerson, amount: share, walletId: walletId!, date,
           note: `Su parte${note.trim() ? ` · ${note.trim()}` : selected ? ` · ${selected.name}` : ''}`, createdAt: Date.now()
         });
       }
       await processRecurring();
-      toast(type === 'expense' ? 'Gasto guardado' : type === 'income' ? 'Ingreso guardado' : type === 'debt' ? 'Préstamo guardado' : 'Transferencia guardada');
+      toast(allOwed ? `${personMap.get(sharePerson!)?.name ?? 'Esa persona'} te debe ${fmt(cents)}` : type === 'expense' ? 'Gasto guardado' : type === 'income' ? 'Ingreso guardado' : type === 'debt' ? 'Préstamo guardado' : 'Transferencia guardada');
     } else {
       if (repeat && recurringId == null) {
         const { photo: _p, createdAt: _c, recurringId: _r, date: _d, ...tpl } = tx;
@@ -268,7 +305,7 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
         <Segmented
           id="txtype"
           value={type}
-          onChange={(t) => { setType(t); setShareOn(false); }}
+          onChange={(t) => { setType(t); setSplit('mine'); }}
           options={[{ value: 'expense', label: 'Gasto' }, { value: 'income', label: 'Ingreso' }, { value: 'transfer', label: 'Mover' }, { value: 'debt', label: 'Préstamo' }]}
         />
       </div>
@@ -277,6 +314,9 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4"
         onFocus={(e) => (e.target as HTMLElement).tagName === 'INPUT' && (e.target as HTMLInputElement).type !== 'date' && (e.target as HTMLInputElement).type !== 'file' && setTyping(true)}
         onBlur={() => setTimeout(() => setTyping(false), 120)}
+        // Al arrastrar para ver lo de abajo se cierra el teclado (como en las apps del iPhone)
+        onTouchStart={(e) => { touchY.current = e.touches[0].clientY; }}
+        onTouchMove={(e) => { if (typing && Math.abs(e.touches[0].clientY - touchY.current) > 12) blurActive(); }}
       >
         {/* Importe: teclado numérico del propio móvil */}
         <motion.label key={shake} animate={shake ? { x: [0, -10, 9, -6, 4, 0] } : {}} transition={{ duration: 0.4 }} className="flex items-baseline justify-center gap-1.5 pb-4 pt-6">
@@ -308,7 +348,7 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
                 return (
                   <Press key={c.id} scale={0.88} onClick={() => {
                       // Con subcategorías esperamos a que elija una; sin ellas, ya está: a la nota
-                      if (categories.some((s) => s.parentId === c.id)) { setCategoryId(c.id); amountRef.current?.blur(); }
+                      if (categories.some((s) => s.parentId === c.id)) { setCategoryId(c.id); blurActive(); }
                       else pickCategory(c.id!);
                     }} className="flex min-w-0 flex-col items-center gap-1.5">
                     <Tile icon={c.icon} color={c.color} size={52} active={on} />
@@ -365,7 +405,6 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
           <div className="flex items-center gap-3 px-4">
             <span className={note ? 'text-accent' : 'text-ink3'}><Edit size={20} /></span>
             <input
-              ref={noteRef}
               type="text"
               className="min-w-0 flex-1 bg-transparent py-4 text-[17px] outline-none placeholder:text-ink3"
               placeholder="Mercadona, cena con Laura…"
@@ -460,39 +499,62 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
           </Press>
         )}
 
-        {/* Gasto compartido: alguien te debe una parte */}
+        {/* ¿De quién es este gasto? Todo tuyo, a medias, una parte o todo de otra persona */}
         {type === 'expense' && isNew && (
-          <div className="mt-3 overflow-hidden rounded-[22px] bg-surface">
-            <Press scale={0.99} onClick={() => setShareOn((v) => !v)} className="flex w-full items-center gap-3 px-4 py-3.5 text-left">
-              <span className="text-ink3"><UserMultiple size={18} /></span>
-              <span className="flex-1">
-                <span className="block text-[15px]">Alguien te debe una parte</span>
-                <span className="block text-[12px] text-ink3">Pagaste tú, pero no todo es gasto tuyo</span>
-              </span>
-              <span className={`flex h-[28px] w-[46px] items-center rounded-full p-[3px] transition-colors ${shareOn ? 'bg-pos' : 'bg-ink/15'}`}>
-                <motion.span layout transition={spring} className={`h-[22px] w-[22px] rounded-full bg-white shadow ${shareOn ? 'ml-auto' : ''}`} />
-              </span>
-            </Press>
-            <AnimatePresence>
-              {shareOn && (
-                <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="border-t hair">
-                  <Row icon={<Avatar name={personMap.get(sharePerson!)?.name} color={personMap.get(sharePerson!)?.color} size={22} />} label="Quién" onClick={() => setSheet('sharePerson')}>
-                    {sharePerson != null ? personMap.get(sharePerson)?.name : 'Elegir'}
-                  </Row>
-                  <div className="flex items-center gap-2 px-4 pb-3.5">
-                    <Press scale={0.94} onClick={() => setShareExpr('half')} className={`rounded-full px-3.5 py-2 text-[14px] font-medium ${shareExpr === 'half' ? 'bg-ink text-paper' : 'bg-ink/[0.06]'}`}>La mitad</Press>
+          <div className="mt-3 rounded-[22px] bg-surface p-4">
+            <p className="text-[15px] font-semibold">¿De quién es este gasto?</p>
+            <p className="text-[12px] text-ink3">Si pagaste tú algo que no es (todo) tuyo, apunta quién te lo debe</p>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {SPLITS.map(([v, label]) => {
+                const on = split === v;
+                return (
+                  <Press
+                    key={v}
+                    scale={0.95}
+                    // Tocar otra vez la opción elegida la quita (vuelve a «Todo mío»)
+                    onClick={() => { blurActive(); setSplit(on ? 'mine' : v); }}
+                    className={`rounded-2xl px-3 py-2.5 text-[14px] font-semibold transition-colors ${on ? 'bg-ink text-paper' : 'bg-ink/[0.06] text-ink2'}`}
+                  >
+                    {label}
+                  </Press>
+                );
+              })}
+            </div>
+            <AnimatePresence initial={false}>
+              {split !== 'mine' && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                  <p className="pb-2 pt-4 text-[13px] font-medium text-ink2">¿Quién te lo debe?</p>
+                  <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4">
+                    {quickPeople.map((p) => {
+                      const on = sharePerson === p.id;
+                      return (
+                        <Press key={p.id} scale={0.92} onClick={() => setSharePerson(on ? undefined : p.id)} className={`flex shrink-0 items-center gap-1.5 rounded-full py-1.5 pl-1.5 pr-3 text-[14px] font-semibold transition-colors ${on ? 'bg-ink text-paper' : 'bg-ink/[0.06] text-ink2'}`}>
+                          <Avatar name={p.name} color={p.color} size={24} />
+                          {p.name}
+                        </Press>
+                      );
+                    })}
+                    <Press scale={0.92} onClick={() => { blurActive(); setSheet('sharePerson'); }} className="flex shrink-0 items-center gap-1 rounded-full border border-dashed border-ink/25 px-3 py-1.5 text-[14px] font-semibold text-ink2">
+                      <Add size={15} /> {quickPeople.length ? 'Otra' : 'Elegir persona'}
+                    </Press>
+                  </div>
+                  {split === 'part' && (
                     <input
                       type="text"
                       inputMode="decimal"
-                      className="min-w-0 flex-1 rounded-full bg-ink/[0.06] px-4 py-2 text-[15px] outline-none placeholder:text-ink3"
-                      placeholder="Otra cantidad"
-                      value={shareExpr === 'half' ? '' : shareExpr}
+                      enterKeyHint="done"
+                      className="mt-3 w-full rounded-2xl bg-ink/[0.06] px-4 py-3 text-[16px] outline-none placeholder:text-ink3"
+                      placeholder="¿Cuánto te debe?"
+                      value={shareExpr}
                       onChange={(e) => setShareExpr(e.target.value.replace(/[^\d.,]/g, ''))}
+                      onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
                     />
-                  </div>
-                  {share > 0 && share < cents && (
-                    <p className="px-4 pb-3.5 text-[13px] text-ink2">
-                      Tu gasto: <span className="money font-semibold">{fmt(cents - share)}</span> · Te debe: <span className="money font-semibold">{fmt(share)}</span>
+                  )}
+                  {cents > 0 && share > 0 && (
+                    <p className="pt-3 text-[13px] leading-relaxed text-ink2">
+                      {allOwed
+                        ? <>No cuenta como gasto tuyo: {personMap.get(sharePerson!)?.name ?? 'esa persona'} te deberá <span className="money font-semibold">{fmt(cents)}</span>.</>
+                        : <>Tu gasto: <span className="money font-semibold">{fmt(cents - share)}</span> · {personMap.get(sharePerson!)?.name ?? 'Te'} te debe: <span className="money font-semibold">{fmt(share)}</span></>}
                     </p>
                   )}
                 </motion.div>
@@ -502,6 +564,14 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
         )}
       </div>
 
+      {/* Con el teclado abierto: barra fina con «Listo» justo encima del teclado (el numérico del iPhone no
+          tiene botón para cerrarlo) */}
+      {typing && (
+        <div className="flex items-center gap-2 border-t px-4 py-1.5 hair">
+          <span className="flex-1 truncate text-[12px] font-medium text-ink3">{missing}</span>
+          <Press scale={0.94} onClick={blurActive} className="rounded-full bg-ink/[0.07] px-4 py-1.5 text-[15px] font-semibold">Listo</Press>
+        </div>
+      )}
       {/* Guardar (se esconde mientras escribes, el de arriba sigue a mano) */}
       {!typing && (
         <div className="pb-safe border-t px-4 pt-2.5 hair">

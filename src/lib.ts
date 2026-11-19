@@ -1,5 +1,4 @@
 import { db, type Frequency, type Transaction, type Category, type Wallet } from './db';
-import { getHousehold } from './sync';
 import { currentUser } from './cloud';
 
 // ---------- Dinero ----------
@@ -158,13 +157,14 @@ export async function processRecurring() {
   processing = true;
   try {
     const today = todayISO();
-    // En pareja, cada repetición la genera solo el móvil de quien la creó (si no, saldrían duplicadas)
-    const house = getHousehold();
+    // En una cartera compartida, cada repetición la genera solo el móvil de quien la creó (si no, saldrían
+    // duplicadas), aunque este móvil esté desconectado en ese momento
     const me = currentUser()?.uid;
+    const shared = new Set((await db.wallets.toArray()).filter((w) => w.shared).map((w) => w.id));
     const due = await db.recurring
       .where('nextDate')
       .belowOrEqual(today)
-      .filter((r) => r.active && (!house || !r.by || r.by === me))
+      .filter((r) => r.active && (!r.by || r.by === me || !(shared.has(r.walletId) || (r.toWalletId != null && shared.has(r.toWalletId)))))
       .toArray();
     for (const r of due) {
       await db.transaction('rw', db.recurring, db.transactions, async () => {

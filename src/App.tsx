@@ -11,6 +11,7 @@ import { TxEditor } from './screens/TxEditor';
 import { Budgets, BudgetEdit } from './screens/Budgets';
 import { useData } from './store';
 import { isStandalone, shouldShowLanding } from './install';
+import { applyUpdate, useUpdateReady } from './update';
 
 // Lo que no hace falta para abrir la app se descarga solo cuando se usa
 const Stats = lazy(() => import('./screens/Stats').then((m) => ({ default: m.Stats })));
@@ -156,7 +157,28 @@ export default function App() {
       </AnimatePresence>
 
       <OverlayHost />
+      <UpdateBanner />
     </NavCtx.Provider>
+  );
+}
+
+/** «Hay una versión nueva · Actualizar»: arriba, por encima de todo, hasta que se pulse. */
+function UpdateBanner() {
+  const ready = useUpdateReady();
+  const [busy, setBusy] = useState(false);
+  return (
+    <AnimatePresence>
+      {ready && (
+        <motion.div initial={{ y: -60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -60, opacity: 0 }} transition={spring} className="pt-safe pointer-events-none fixed inset-x-0 top-0 z-[105] flex justify-center px-4">
+          <div className="glass pointer-events-auto mt-1 flex items-center gap-2 rounded-full py-1 pl-4 pr-1 text-[14px]">
+            <span className="font-semibold">Hay una versión nueva</span>
+            <Press scale={0.94} disabled={busy} onClick={() => { setBusy(true); applyUpdate(); }} className="rounded-full bg-accent px-4 py-2 font-semibold text-white">
+              {busy ? 'Actualizando…' : 'Actualizar'}
+            </Press>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 

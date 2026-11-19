@@ -8,6 +8,7 @@ import { exportBackup, exportCSV, importBackup, wipeAll } from '../lib';
 import { useData } from '../store';
 import { useNav } from '../nav';
 import { Group, LargeTitle, Logo, Press, Segmented, Tile, confirmDialog, spring, toast } from '../components/ui';
+import { checkForUpdate, versionLabel } from '../update';
 
 function Row({ icon, color, label, detail, onClick, right }: { icon: string; color: string; label: string; detail?: string; onClick?: () => void; right?: ReactNode }) {
   return (
@@ -127,7 +128,10 @@ export function Settings() {
         </Press>
         <div className="mt-10 flex justify-center"><Logo size={44} /></div>
         <p className="mt-2 text-center font-serif text-[18px] text-ink3">Eco</p>
-        <p className="text-center text-[12px] text-ink3">versión 0.3</p>
+        <p className="text-center text-[12px] text-ink3">Versión del {versionLabel()}</p>
+        <Press scale={0.96} onClick={() => checkForUpdate().then((found) => !found && toast('Tienes la última versión'))} className="mx-auto mt-2 block rounded-full bg-ink/[0.06] px-4 py-2 text-[13px] font-semibold text-ink2">
+          Buscar actualización
+        </Press>
       </div>
     </div>
   );

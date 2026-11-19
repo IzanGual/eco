@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Copy, Share, UserMultiple } from '@carbon/icons-react';
 import { currentUser, onUser, signInWithGoogle, type CloudUser } from '../cloud';
-import { createHousehold, joinHousehold, leaveHousehold, lookupInvite, memberName, partnerName, setWalletShared } from '../sync';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { createHousehold, dismissLegacyBackup, joinHousehold, leaveHousehold, lookupInvite, memberName, onSyncProblem, partnerName, restoreLegacyWallet, setWalletShared, switchToCurrentAccount, type LegacyBackup, type SyncProblem } from '../sync';
+import { db } from '../db';
+import { APP_VERSION, applyUpdate, checkForUpdate, useUpdateReady, versionLabel } from '../update';
 import { useHousehold } from '../useHousehold';
 import { useData } from '../store';
 import { useNav } from '../nav';
@@ -19,12 +22,17 @@ export function Couple({ code: initialCode }: { code?: string }) {
   const [user, setUser] = useState<CloudUser | null>(null);
   const [code, setCode] = useState(initialCode ?? '');
   const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<SyncProblem>(null);
   useEffect(() => onUser(setUser), []);
+  useEffect(() => onSyncProblem(setProblem), []);
+  const legacy = useLiveQuery(() => db.settings.get('legacyBackup').then((r) => r?.value as LegacyBackup | undefined), []);
 
   const connected = !!h && h.members.length > 1;
   const partner = partnerName() ?? 'tu pareja';
   const me = currentUser()?.uid;
   const balances = walletBalances(wallets, txs);
+  const partnerUid = h?.members.find((m) => m !== me);
+  const partnerVersion = partnerUid ? h?.versions?.[partnerUid] : undefined;
 
   async function run(fn: () => Promise<unknown>, ok?: string) {
     setBusy(true);
@@ -95,7 +103,10 @@ export function Couple({ code: initialCode }: { code?: string }) {
             <p className="mt-1.5 text-[14px] leading-relaxed text-ink2">
               Conecta tu Eco con el de tu pareja y elige qué carteras compartís (por ejemplo, «Cuenta común»). Lo que apuntéis en ellas os sale a los dos al momento. El resto sigue siendo solo tuyo.
             </p>
-            <Press scale={0.97} disabled={busy} onClick={() => run(createHousehold, 'Invitación creada')} className="btn-ink mt-4 w-full">
+            <Press scale={0.97} disabled={busy} onClick={() => run(async () => {
+              const r = await createHousehold();
+              toast(r.existing ? 'Ya estabas conectado: recuperado' : 'Invitación creada');
+            })} className="btn-ink mt-4 w-full">
               {busy ? 'Creando…' : 'Invitar a mi pareja'}
             </Press>
           </motion.div>
@@ -108,6 +119,20 @@ export function Couple({ code: initialCode }: { code?: string }) {
         </>
       ) : (
         <>
+          {problem && (
+            <div className="mb-3 rounded-[24px] bg-accent/10 p-5">
+              <p className="font-serif text-[22px] leading-tight">{problem.kind === 'otherAccount' ? 'Has entrado con otra cuenta' : 'Esta cuenta no está conectada'}</p>
+              <p className="mt-1.5 text-[14px] leading-relaxed text-ink2">
+                {problem.kind === 'otherAccount'
+                  ? <>Este móvil se conectó con <b>{problem.boundEmail}</b>, pero ahora estás con <b>{problem.email}</b>. Mientras tanto no se sincroniza nada. Cierra sesión en Ajustes y entra con {problem.boundEmail}.</>
+                  : <>Con <b>{problem.email}</b> no estás conectado con nadie.{problem.boundEmail && problem.boundEmail !== problem.email ? <> Este móvil se conectó con <b>{problem.boundEmail}</b>: entra con esa cuenta.</> : ' Si conectaste con otra cuenta de Google, entra con ella.'} Tus datos siguen aquí.</>}
+              </p>
+              <Press scale={0.97} disabled={busy} onClick={() => run(switchToCurrentAccount)} className="btn-soft mt-4 w-full">
+                {problem.kind === 'otherAccount' ? `Seguir con ${problem.email}` : 'Olvidar esta conexión'}
+              </Press>
+            </div>
+          )}
+
           {/* Con quién */}
           <div className="flex items-center gap-3 rounded-[24px] bg-surface p-4">
             <div className="flex -space-x-2">
@@ -120,6 +145,7 @@ export function Couple({ code: initialCode }: { code?: string }) {
             <div className="flex-1">
               <p className="text-[16px] font-semibold">{connected ? `Conectado con ${partner}` : 'Esperando a tu pareja'}</p>
               <p className="text-[13px] text-ink3">{connected ? 'Las carteras compartidas se sincronizan solas' : 'Envíale el código para conectar'}</p>
+              {user && <p className="mt-0.5 truncate text-[12px] text-ink3">Has entrado como {user.email}</p>}
             </div>
           </div>
 
@@ -134,6 +160,10 @@ export function Couple({ code: initialCode }: { code?: string }) {
               </div>
             </div>
           )}
+
+          {connected && <Versions partner={partner} partnerVersion={partnerVersion} />}
+
+          {legacy && legacy.wallets.some(Boolean) && <LegacyCard legacy={legacy} partner={partner} />}
 
           {connected && (
             <>
@@ -187,6 +217,63 @@ export function Couple({ code: initialCode }: { code?: string }) {
 
       <HowItWorks />
     </Page>
+  );
+}
+
+/** Versión de cada uno: si alguien va atrasado, se avisa (con versiones distintas la sincronización falla). */
+function Versions({ partner, partnerVersion }: { partner: string; partnerVersion?: string }) {
+  const ready = useUpdateReady();
+  const meBehind = ready || (!!partnerVersion && partnerVersion > APP_VERSION);
+  const partnerBehind = !partnerVersion || partnerVersion < APP_VERSION;
+  if (!meBehind && !partnerBehind) {
+    return <p className="px-1 pt-2 text-[12px] text-ink3">Los dos tenéis la última versión ({versionLabel()}).</p>;
+  }
+  return (
+    <div className="mt-3 rounded-[22px] bg-surface p-4">
+      <p className="text-[15px] font-semibold">{meBehind ? 'Tu Eco no está al día' : `El Eco de ${partner} no está al día`}</p>
+      <p className="mt-1 text-[13px] leading-relaxed text-ink2">
+        {meBehind
+          ? 'Actualiza para que todo se sincronice bien.'
+          : `Dile que abra Eco y pulse «Actualizar» (o que la cierre del todo y la vuelva a abrir). Con versiones distintas, algunas cosas pueden no cuadrar.`}
+      </p>
+      <p className="mt-2 text-[12px] text-ink3">Tú: {versionLabel()} · {partner}: {partnerVersion ? versionLabel(partnerVersion) : 'una anterior'}</p>
+      {meBehind && (
+        <Press scale={0.97} onClick={() => (ready ? applyUpdate() : checkForUpdate())} className="btn-accent mt-3 w-full">Actualizar</Press>
+      )}
+    </div>
+  );
+}
+
+/** Lo que quitó la limpieza de la versión antigua: se puede recuperar cartera a cartera. */
+function LegacyCard({ legacy, partner }: { legacy: LegacyBackup; partner: string }) {
+  const wallets = legacy.wallets.filter(Boolean) as NonNullable<LegacyBackup['wallets'][number]>[];
+  const count = (id: number) => legacy.transactions.filter((t) => t.walletId === id || t.toWalletId === id).length;
+  return (
+    <div className="mt-6 rounded-[22px] bg-surface p-4">
+      <p className="text-[15px] font-semibold">Carteras quitadas en la actualización</p>
+      <p className="mt-1 text-[13px] leading-relaxed text-ink2">
+        Al ordenar el modo pareja se quitaron de este móvil estas carteras, porque parecían copias de las de {partner} de la primera versión. Si alguna era tuya, recupérala con sus movimientos.
+      </p>
+      <div className="divide-hair mt-3 overflow-hidden rounded-[18px] bg-ink/[0.04]">
+        {wallets.map((w) => (
+          <div key={w.id} className="flex items-center gap-3 px-3 py-2.5">
+            <Tile icon={w.icon} color={w.color} size={32} />
+            <span className="flex-1">
+              <span className="block text-[15px] font-medium">{w.name}</span>
+              <span className="block text-[12px] text-ink3">{count(w.id!)} movimientos</span>
+            </span>
+            <Press scale={0.94} onClick={async () => { await restoreLegacyWallet(w.id!); toast(`«${w.name}» recuperada`); }} className="rounded-full bg-ink px-3.5 py-1.5 text-[14px] font-semibold text-paper">Recuperar</Press>
+          </div>
+        ))}
+      </div>
+      <Press
+        scale={0.97}
+        onClick={async () => { if (await confirmDialog('¿No recuperar ninguna?', { message: 'Se borra la copia de estas carteras de este móvil.', confirm: 'No recuperar' })) dismissLegacyBackup(); }}
+        className="mt-3 w-full py-1 text-center text-[13px] font-semibold text-ink3"
+      >
+        Ninguna era mía
+      </Press>
+    </div>
   );
 }
 

@@ -1,6 +1,5 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { registerSW } from 'virtual:pwa-register';
 import App from './App';
 import { DataProvider } from './store';
 import { seedIfEmpty } from './db';
@@ -10,10 +9,10 @@ import '@fontsource/instrument-serif/400.css';
 import '@fontsource-variable/instrument-sans';
 import './index.css';
 import './install';
+import { initUpdates } from './update';
 
-// Las versiones nuevas se instalan en segundo plano y se usan la próxima vez que abras la app,
-// en vez de recargar la pantalla nada más abrirla (eso era un segundo arranque completo)
-registerSW({ immediate: true });
+// Las versiones nuevas se descargan en segundo plano y la app avisa con un botón «Actualizar»
+initUpdates();
 initSync();
 
 // Pide al navegador que no borre los datos aunque falte espacio

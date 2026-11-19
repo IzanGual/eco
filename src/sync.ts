@@ -11,7 +11,8 @@
 // se busca (o se crea) una con el mismo nombre. Así cada uno conserva sus categorías.
 import type { Unsubscribe } from 'firebase/firestore';
 import { db, newId, SHARED_TABLES, type Category, type Recurring, type SharedTable, type Transaction, type Wallet } from './db';
-import { currentUser, load, onUser } from './cloud';
+import { currentUser, load, onUser, type CloudUser } from './cloud';
+import { APP_VERSION } from './update';
 
 export interface Household {
   id: string;
@@ -20,9 +21,12 @@ export interface Household {
   names: Record<string, string>;
   photos?: Record<string, string>;
   code: string;
+  createdAt?: number;
+  versions?: Record<string, string>; // versión de la app de cada uno (para avisar si alguien va atrasado)
 }
 
 const LS_HOUSE = 'eco:household';
+const LS_HOUSE_USER = 'eco:householdUser'; // con qué cuenta de Google se conectó este móvil
 const LS_OUTBOX = 'eco:outbox';
 const LS_PULL = 'eco:lastPull';
 const LS_SENT = 'eco:sharedKeys';
@@ -39,6 +43,32 @@ const setHouse = (h: Household | null) => {
   subs.forEach((s) => s(h));
 };
 export const getHousehold = () => house;
+
+type HouseUser = { uid: string; email: string };
+const getHouseUser = (): HouseUser | null => {
+  try { return JSON.parse(localStorage.getItem(LS_HOUSE_USER) || 'null'); } catch { return null; }
+};
+const setHouseUser = (u: HouseUser | null) => {
+  if (u) localStorage.setItem(LS_HOUSE_USER, JSON.stringify(u));
+  else localStorage.removeItem(LS_HOUSE_USER);
+};
+
+// Algo no cuadra con la cuenta (se ve en «En pareja»). Nunca se desconecta solo: lo decide la persona.
+//  otherAccount: este móvil se conectó con otra cuenta de Google distinta a la de ahora
+//  notMember:    con la cuenta de ahora no estás en ningún espacio de pareja
+export type SyncProblem = { kind: 'otherAccount' | 'notMember'; email: string; boundEmail?: string } | null;
+let problem: SyncProblem = null;
+const problemSubs = new Set<(p: SyncProblem) => void>();
+const setProblem = (p: SyncProblem) => {
+  problem = p;
+  problemSubs.forEach((s) => s(p));
+};
+export function onSyncProblem(cb: (p: SyncProblem) => void) {
+  problemSubs.add(cb);
+  cb(problem);
+  return () => { problemSubs.delete(cb); };
+}
+const toastLater = (text: string) => { import('./components/ui').then((ui) => ui.toast(text)).catch(() => {}); };
 export function onHousehold(cb: (h: Household | null) => void) {
   subs.add(cb);
   cb(house);
@@ -174,25 +204,31 @@ export async function flush() {
 let unsubDocs: Unsubscribe | null = null;
 let unsubHouse: Unsubscribe | null = null;
 
+let listenRun = 0;
+const rechecked = new Set<string>();
+
 async function listen() {
   stopListening();
+  const run = ++listenRun; // si se vuelve a llamar mientras tanto, esta llamada se retira
   const me = currentUser();
   if (!house || !me) return;
   const { fs } = await load();
-  const { collection, doc, onSnapshot, query, where, Timestamp } = await import('firebase/firestore');
+  const { collection, doc, onSnapshot, query, where, Timestamp, updateDoc } = await import('firebase/firestore');
   await cleanLegacy(house.id, me.uid).catch(() => {});
-  if (!house) return;
+  if (!house || run !== listenRun) return;
+  const hid = house.id;
   const since = Number(localStorage.getItem(LS_PULL) || 0);
 
-  unsubHouse = onSnapshot(doc(fs, 'households', house.id), (snap) => {
-    if (!snap.exists() || !(snap.data().members as string[]).includes(me.uid)) {
-      stopListening();
-      setHouse(null);
-      return;
-    }
-    setHouse({ id: snap.id, ...(snap.data() as Omit<Household, 'id'>) });
+  unsubHouse = onSnapshot(doc(fs, 'households', hid), (snap) => {
+    const data = snap.data() as Omit<Household, 'id'> | undefined;
+    if (!data || !data.members.includes(me.uid)) return recheck(hid);
+    setHouse({ id: snap.id, ...data });
+    // Cada uno apunta qué versión usa: así «En pareja» avisa si el otro va atrasado
+    if (data.versions?.[me.uid] !== APP_VERSION) updateDoc(snap.ref, { [`versions.${me.uid}`]: APP_VERSION }).catch(() => {});
   }, (err) => {
-    if (err.code === 'permission-denied') { stopListening(); setHouse(null); }
+    // Sin permiso = la nube dice que no eres miembro (o has entrado con otra cuenta). No se desconecta a ciegas:
+    // se pregunta a la nube en qué espacio estás de verdad.
+    if (err.code === 'permission-denied') recheck(hid);
   });
 
   const q = query(collection(fs, 'households', house.id, 'docs'), where('u', '>=', Timestamp.fromMillis(since)));
@@ -274,7 +310,10 @@ async function cleanLegacy(hid: string, me: string) {
     try { rec = JSON.parse(v.d); } catch { continue; }
     if (rec.shared) continue;
     const local = await db.wallets.get(v.id);
-    if (local && !local.shared) gone.add(v.id);
+    if (!local || local.shared) continue;
+    // Si en ella hay algo apuntado por ti, es tuya (aunque la tocara tu pareja por última vez): no se quita
+    if (await db.transactions.filter((t) => (t.walletId === v.id || t.toWalletId === v.id) && t.by === me).count()) continue;
+    gone.add(v.id);
   }
   if (gone.size) {
     const inGone = (id?: number) => id != null && gone.has(id);
@@ -298,6 +337,149 @@ async function cleanLegacy(hid: string, me: string) {
     import('./components/ui').then((ui) => ui.toast(n === 1 ? `Quitada 1 cartera de ${partnerName() ?? 'tu pareja'} que no está compartida` : `Quitadas ${n} carteras de ${partnerName() ?? 'tu pareja'} que no están compartidas`)).catch(() => {});
   }
   localStorage.setItem(flag, '1');
+}
+
+/** Copia de lo que quitó la limpieza de la versión antigua (para poder recuperarlo). */
+export interface LegacyBackup { at: number; wallets: (Wallet | undefined)[]; recurring: Recurring[]; transactions: Transaction[] }
+
+/** Vuelve a poner en este móvil una cartera que quitó la limpieza, con sus movimientos y repeticiones. */
+export async function restoreLegacyWallet(id: number) {
+  await db.transaction('rw', [db.wallets, db.transactions, db.recurring, db.settings], async (tx) => {
+    (tx as unknown as MaybeRemote).remote = true; // es personal: no viaja a nadie
+    const b = (await db.settings.get('legacyBackup'))?.value as LegacyBackup | undefined;
+    const w = b?.wallets.find((x) => x?.id === id);
+    if (!b || !w) return;
+    const touches = (r: { walletId: number; toWalletId?: number }) => r.walletId === id || r.toWalletId === id;
+    const { shared: _s, owner: _o, ...plain } = w;
+    await db.wallets.put(plain);
+    await db.transactions.bulkPut(b.transactions.filter(touches));
+    await db.recurring.bulkPut(b.recurring.filter(touches));
+    const rest: LegacyBackup = {
+      at: b.at,
+      wallets: b.wallets.filter((x) => x && x.id !== id),
+      transactions: b.transactions.filter((t) => !touches(t)),
+      recurring: b.recurring.filter((r) => !touches(r))
+    };
+    if (rest.wallets.length) await db.settings.put({ key: 'legacyBackup', value: rest });
+    else await db.settings.delete('legacyBackup');
+  });
+}
+
+export const dismissLegacyBackup = () => db.settings.delete('legacyBackup');
+
+// ---------- ¿En qué espacio estoy? ----------
+// La conexión se guarda en el móvil, pero quien manda es la nube: al entrar con Google se le pregunta en qué
+// espacio estás. Así, si el móvil la pierde (reinstalar, borrar datos, un error), se recupera sola.
+/** Devuelve true si este móvil ha cambiado de espacio (o lo ha recuperado). */
+async function reconcile(me: CloudUser): Promise<boolean> {
+  const bound = getHouseUser();
+  if (house && bound && bound.uid !== me.uid) {
+    setProblem({ kind: 'otherAccount', email: me.email, boundEmail: bound.email });
+    return false;
+  }
+  const { fs } = await load();
+  const { collection, deleteDoc, doc, getDocs, query, updateDoc, arrayRemove, where } = await import('firebase/firestore');
+  const snap = await getDocs(query(collection(fs, 'households'), where('members', 'array-contains', me.uid)));
+  const all = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Household, 'id'>) }));
+  if (!all.length) {
+    // Con esta cuenta no estás en ningún espacio. Si el móvil creía que sí, se avisa (no se borra nada)
+    setProblem(house ? { kind: 'notMember', email: me.email, boundEmail: bound?.email } : null);
+    return false;
+  }
+  setProblem(null);
+  // El bueno: el que tiene a los dos; a igualdad, el que ya tenía este móvil; luego el más reciente
+  const score = (h: Household) => (h.members.length > 1 ? 2 : 0) + (h.id === house?.id ? 1 : 0);
+  all.sort((a, b) => score(b) - score(a) || (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  const best = all[0];
+  // Invitaciones sin usar que sobran (p. ej. «Invitar» pulsado al verte desconectado): se retiran
+  for (const h of all.slice(1)) {
+    if (h.members.length !== 1) continue;
+    await updateDoc(doc(fs, 'households', h.id), { members: arrayRemove(me.uid) }).catch(() => {});
+    if (h.code) await deleteDoc(doc(fs, 'invites', h.code)).catch(() => {});
+  }
+  const changed = house?.id !== best.id;
+  if (changed) localStorage.setItem(LS_PULL, '0'); // se baja todo lo compartido otra vez
+  setHouse(best);
+  setHouseUser({ uid: me.uid, email: me.email });
+  if (changed && best.members.length > 1) toastLater(`Reconectado con ${partnerName() ?? 'tu pareja'}`);
+  return changed;
+}
+
+/** El espacio ha dicho que no eres miembro: se pregunta a la nube (una vez) y se actúa según la respuesta. */
+function recheck(hid: string) {
+  stopListening();
+  const me = currentUser();
+  if (!me || rechecked.has(hid)) return;
+  rechecked.add(hid);
+  reconcile(me)
+    .then((changed) => { if (house && (changed || house.id !== hid)) return start(changed); })
+    .catch(() => {});
+}
+
+/**
+ * Tras recuperar la conexión: sube lo de las carteras compartidas que se apuntó mientras este móvil estaba
+ * desconectado (lo que no está en la nube). Y quita las copias de repeticiones de tu pareja que este móvil
+ * generó por su cuenta mientras tanto (saldrían duplicadas: las suyas las genera su móvil).
+ */
+async function pushMissing(hid: string, me: string) {
+  const sharedIds = new Set((await db.wallets.toArray()).filter((w) => w.shared).map((w) => w.id!));
+  if (!sharedIds.size) return;
+  const { fs } = await load();
+  const { collection, getDocs } = await import('firebase/firestore');
+  const remote = new Set((await getDocs(collection(fs, 'households', hid, 'docs'))).docs.map((d) => d.id));
+  if (!house || house.id !== hid) return;
+  const inShared = (r: { walletId: number; toWalletId?: number }) => sharedIds.has(r.walletId) || (r.toWalletId != null && sharedIds.has(r.toWalletId));
+  for (const w of await db.wallets.bulkGet([...sharedIds])) {
+    if (w && (!w.owner || w.owner === me) && !remote.has(`wallets_${w.id}`)) enqueue('wallets', w.id);
+  }
+  for (const r of await db.recurring.filter((r) => inShared(r) && !r.private).toArray()) {
+    if (!remote.has(`recurring_${r.id}`) && (!r.by || r.by === me)) enqueue('recurring', r.id);
+  }
+  const dupes: number[] = [];
+  for (const t of await db.transactions.filter((t) => inShared(t) && !t.private).toArray()) {
+    if (remote.has(`transactions_${t.id}`)) continue;
+    if (!t.by || t.by === me) enqueue('transactions', t.id);
+    else if (t.recurringId != null) dupes.push(t.id!);
+  }
+  if (dupes.length) {
+    await db.transaction('rw', db.transactions, async (tx) => {
+      (tx as unknown as MaybeRemote).remote = true;
+      await db.transactions.bulkDelete(dupes);
+    });
+  }
+}
+
+/** Arranca la sincronización (y, si hace falta, sube lo que faltaba). */
+async function start(resync = false) {
+  const me = currentUser();
+  if (!house || !me || problem) return; // con la cuenta equivocada no se sincroniza nada
+  const hid = house.id;
+  await listen();
+  flush().catch(() => {});
+  const flag = `eco:resync:${hid}`;
+  if (resync || !localStorage.getItem(flag)) {
+    await pushMissing(hid, me.uid).then(() => localStorage.setItem(flag, '1')).catch(() => {});
+  }
+  // Las repeticiones propias que tocaban mientras no había sesión
+  import('./lib').then((l) => l.processRecurring()).catch(() => {});
+}
+
+/** «En pareja» → usar la cuenta con la que has entrado ahora (olvida con qué cuenta se conectó este móvil). */
+export async function switchToCurrentAccount() {
+  const me = currentUser();
+  if (!me) throw new Error('Inicia sesión con Google primero');
+  setHouseUser(null);
+  rechecked.clear();
+  const changed = await reconcile(me);
+  if (!house) return;
+  if (problem?.kind === 'notMember') {
+    // Tampoco con esta cuenta: este móvil se queda sin conexión (los datos no se tocan)
+    stopListening();
+    setHouse(null);
+    setProblem(null);
+    return;
+  }
+  await start(changed);
 }
 
 function stopListening() {
@@ -359,10 +541,19 @@ export async function setWalletShared(id: number, on: boolean) {
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const makeCode = () => Array.from({ length: 6 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
-/** Crea la conexión con tu pareja (aún no comparte nada) y devuelve el código de invitación. */
-export async function createHousehold(name = 'Nuestra casa') {
+/**
+ * Crea la conexión con tu pareja (aún no comparte nada). Si en la nube ya estabas conectado (o ya tenías una
+ * invitación), no crea otra: recupera esa. Devuelve el código y si ya existía.
+ */
+export async function createHousehold(name = 'Nuestra casa'): Promise<{ code: string; existing: boolean }> {
   const me = currentUser();
   if (!me) throw new Error('Inicia sesión con Google primero');
+  setHouseUser(null);
+  const changed = await reconcile(me);
+  if (house) {
+    await start(changed);
+    return { code: house.code, existing: true };
+  }
   const { fs } = await load();
   const { collection, doc, setDoc } = await import('firebase/firestore');
   const ref = doc(collection(fs, 'households'));
@@ -371,9 +562,10 @@ export async function createHousehold(name = 'Nuestra casa') {
   await setDoc(ref, data);
   await setDoc(doc(fs, 'invites', code), { hid: ref.id, owner: me.uid });
   setHouse({ id: ref.id, ...data });
+  setHouseUser({ uid: me.uid, email: me.email });
   localStorage.setItem(LS_PULL, '0');
   await listen();
-  return code;
+  return { code, existing: false };
 }
 
 /** Busca un código de invitación. */
@@ -402,7 +594,9 @@ export async function joinHousehold(code: string) {
   const snap = await getDoc(doc(fs, 'households', hid));
   localStorage.setItem(LS_PULL, '0');
   setHouse({ id: hid, ...(snap.data() as Omit<Household, 'id'>) });
-  await listen();
+  setHouseUser({ uid: me.uid, email: me.email });
+  setProblem(null);
+  await start(true);
 }
 
 /** Se desconecta. Las carteras compartidas se quedan en este móvil como tuyas, pero dejan de sincronizarse. */
@@ -418,6 +612,8 @@ export async function leaveHousehold() {
   sent.clear();
   saveSent();
   setHouse(null);
+  setHouseUser(null);
+  setProblem(null);
 }
 
 /** Nombre corto de un miembro. */
@@ -436,10 +632,12 @@ export function partnerName() {
 // Al iniciar o cerrar sesión, se activa o se para la sincronización
 export function initSync() {
   onUser((u) => {
-    if (u && house) {
-      listen().catch(() => {});
-      flush().catch(() => {});
-    } else stopListening();
+    if (!u) return stopListening();
+    // Primero se pregunta a la nube en qué espacio estás (aunque este móvil lo hubiera perdido); sin conexión,
+    // se sigue con lo que hay guardado
+    reconcile(u)
+      .then((changed) => start(changed), () => start())
+      .catch(() => {});
   });
   window.addEventListener('online', () => flush().catch(() => {}));
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && flush().catch(() => {}));
