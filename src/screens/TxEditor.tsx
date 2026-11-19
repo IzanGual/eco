@@ -178,8 +178,23 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
   // Si te lo deben todo, no es un gasto tuyo: se guarda como préstamo a esa persona
   const allOwed = splitting && cents > 0 && share >= cents;
   const amountRef = useRef<HTMLInputElement>(null);
-  // Al elegir categoría se cierra el teclado: así se ve todo lo de debajo (la nota se toca si se quiere)
-  const pickCategory = (id: number) => { setCategoryId(id); blurActive(); };
+  const noteRef = useRef<HTMLInputElement>(null);
+  const noteBox = useRef<HTMLDivElement>(null);
+  // La nota sube arriba en cuanto se enfoca (al tocarla o sola tras elegir categoría), no al empezar a escribir.
+  // Se repite cuando el teclado acaba de abrirse, que es cuando cambia el hueco visible.
+  const showNote = () => {
+    const go = () => noteBox.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    requestAnimationFrame(go);
+    setTimeout(go, 350);
+  };
+  // Con la categoría definitiva elegida, lo siguiente es la nota: se enfoca (en el mismo toque, para que el
+  // iPhone abra el teclado) y sube arriba. Si ya hay nota, solo se cierra el teclado.
+  const pickCategory = (id: number) => {
+    setCategoryId(id);
+    if (note.trim()) return blurActive();
+    noteRef.current?.focus({ preventScroll: true });
+    showNote();
+  };
 
   // Personas a las que sueles prestar o que te deben, para elegir de un toque
   const quickPeople = useMemo(() => {
@@ -407,12 +422,14 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
         )}
 
         {/* Nota: una fila, siempre a la vista */}
-        <div className="mt-4 overflow-hidden rounded-[18px] bg-surface ring-accent/60 transition-shadow focus-within:ring-2">
+        <div ref={noteBox} className="mt-4 scroll-mt-2 overflow-hidden rounded-[18px] bg-surface ring-accent/60 transition-shadow focus-within:ring-2">
           <div className="flex items-center gap-3 px-4">
             <span className={note ? 'text-accent' : 'text-ink3'}><Edit size={18} /></span>
             <input
               type="text"
               className="min-w-0 flex-1 bg-transparent py-3 text-[16px] outline-none placeholder:text-ink3"
+              ref={noteRef}
+              onFocus={showNote}
               placeholder="Nota: Mercadona, cena con Laura…"
               value={note}
               onChange={(e) => { noteTouched.current = true; setNote(e.target.value); }}
@@ -579,14 +596,8 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
         )}
       </div>
 
-      {/* Con el teclado abierto: barra fina con «Listo» justo encima del teclado (el numérico del iPhone no
-          tiene botón para cerrarlo) */}
-      {typing ? (
-        <div className="flex items-center gap-2 border-t px-4 py-1.5 hair">
-          <span className="flex-1 truncate text-[12px] font-medium text-ink3">{missing}</span>
-          <Press scale={0.94} onClick={blurActive} className="rounded-full bg-ink/[0.07] px-4 py-1.5 text-[15px] font-semibold">Listo</Press>
-        </div>
-      ) : (
+      {/* Mientras escribes no hay botón abajo (deja sitio; el «Guardar» de arriba sigue a mano) */}
+      {!typing && (
         <div className="pb-safe border-t px-4 pt-2.5 hair">
           {/* Si falta algo, el propio botón lo dice */}
           <Press scale={0.97} onClick={save} className={`mb-1 flex h-[50px] w-full items-center justify-center gap-2 rounded-full text-[16px] font-semibold transition-colors ${valid ? 'bg-accent text-white' : 'bg-ink/[0.08] text-ink3'}`}>
