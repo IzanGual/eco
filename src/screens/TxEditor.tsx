@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  Add, ArrowRight, Calendar, Camera, Checkmark, ChevronLeft, ChevronRight, Close, Edit, Repeat, Search, TrashCan, UserMultiple, Wallet as WalletIcon
+  Add, ArrowRight, Camera, Checkmark, ChevronLeft, ChevronRight, Close, Edit, Repeat, Search, TrashCan, UserMultiple, Wallet as WalletIcon
   , Locked
 } from '@carbon/icons-react';
 import { db, type Category, type DebtDir, type Frequency, type Transaction, type TxType } from '../db';
@@ -16,7 +16,7 @@ import { GlassIconButton, Press, Segmented, Sheet, Tile, confirmDialog, spring, 
 const LAST_WALLET = 'eco:lastWallet';
 
 type Split = 'mine' | 'half' | 'part' | 'all';
-const SPLITS: [Split, string][] = [['mine', 'Todo mío'], ['half', 'A medias'], ['part', 'Una parte'], ['all', 'Me lo deben todo']];
+const SPLITS: [Split, string][] = [['mine', 'Mío'], ['half', 'A medias'], ['part', 'Una parte'], ['all', 'Me lo deben todo']];
 
 /** Cierra el teclado del móvil (quita el foco del campo en el que se escribe). */
 const blurActive = () => (document.activeElement as HTMLElement | null)?.blur?.();
@@ -153,6 +153,13 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
       .filter((c) => c.type === catType && c.parentId == null)
       .sort((a, b) => (score.get(b.id!) ?? 0) - (score.get(a.id!) ?? 0) || a.order - b.order);
   }, [categories, catType, frequent]);
+  // A la vista solo dos filas: las 7 más usadas (la elegida siempre) y «Más» para el resto
+  const shownCats = useMemo(() => {
+    const top = gridCats.slice(0, 7);
+    const root = selectedParent ?? selected;
+    if (root && root.parentId == null && !top.some((c) => c.id === root.id)) top[top.length - 1] = root;
+    return top;
+  }, [gridCats, selected, selectedParent]);
 
   // Las 3 carteras que más usas (la elegida siempre visible)
   const quickWallets = useMemo(() => {
@@ -319,7 +326,7 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
         onTouchMove={(e) => { if (typing && Math.abs(e.touches[0].clientY - touchY.current) > 12) blurActive(); }}
       >
         {/* Importe: teclado numérico del propio móvil */}
-        <motion.label key={shake} animate={shake ? { x: [0, -10, 9, -6, 4, 0] } : {}} transition={{ duration: 0.4 }} className="flex items-baseline justify-center gap-1.5 pb-4 pt-6">
+        <motion.label key={shake} animate={shake ? { x: [0, -10, 9, -6, 4, 0] } : {}} transition={{ duration: 0.4 }} className="flex items-baseline justify-center gap-1.5 pb-3 pt-2">
           <input
             ref={amountRef}
             value={expr}
@@ -330,20 +337,20 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
             aria-label="Importe"
             onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
             style={{ width: `${Math.max(1, expr.length || 1) + 0.4}ch` }}
-            className={`max-w-[80%] bg-transparent text-right font-serif text-[64px] leading-none tabular-nums caret-accent outline-none placeholder:text-ink3 ${type === 'income' ? 'text-pos' : ''}`}
+            className={`max-w-[80%] bg-transparent text-right font-serif text-[52px] leading-none tabular-nums caret-accent outline-none placeholder:text-ink3 ${type === 'income' ? 'text-pos' : ''}`}
           />
-          <span className="font-serif text-[34px] text-ink3">€</span>
+          <span className="font-serif text-[28px] text-ink3">€</span>
         </motion.label>
 
         {/* Categoría: todas las principales a la vista, las más usadas primero */}
         {(type === 'expense' || type === 'income') && (
           <>
-            <div className="flex items-baseline justify-between px-1 pb-2.5">
+            <div className="flex items-baseline justify-between px-1 pb-2">
               <span className="text-[15px] font-semibold">¿En qué?</span>
               <span className={`text-[13px] ${selected ? 'font-semibold text-ink' : 'text-ink3'}`}>{selected ? (selectedParent ? `${selectedParent.name} › ${selected.name}` : selected.name) : 'Toca una categoría'}</span>
             </div>
-            <div className="grid grid-cols-4 gap-x-1.5 gap-y-3">
-              {gridCats.map((c) => {
+            <div className="grid grid-cols-4 gap-x-1.5 gap-y-2.5">
+              {shownCats.map((c) => {
                 const on = categoryId === c.id || selected?.parentId === c.id;
                 return (
                   <Press key={c.id} scale={0.88} onClick={() => {
@@ -351,14 +358,14 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
                       if (categories.some((s) => s.parentId === c.id)) { setCategoryId(c.id); blurActive(); }
                       else pickCategory(c.id!);
                     }} className="flex min-w-0 flex-col items-center gap-1.5">
-                    <Tile icon={c.icon} color={c.color} size={52} active={on} />
-                    <span className={`line-clamp-2 w-full text-center text-[12px] leading-tight ${on ? 'font-semibold text-ink' : 'text-ink2'}`}>{c.name}</span>
+                    <Tile icon={c.icon} color={c.color} size={46} active={on} />
+                    <span className={`w-full truncate text-center text-[12px] leading-tight ${on ? 'font-semibold text-ink' : 'text-ink2'}`}>{c.name}</span>
                   </Press>
                 );
               })}
-              <Press scale={0.88} onClick={() => nav.push({ name: 'categoryEdit', type: catType, parentId: null })} className="flex flex-col items-center gap-1.5">
-                <span className="flex h-[52px] w-[52px] items-center justify-center rounded-[18px] border-[1.5px] border-dashed border-ink/20 text-ink3"><Add size={22} /></span>
-                <span className="text-[12px] text-ink3">Nueva</span>
+              <Press scale={0.88} onClick={() => { blurActive(); setSheet('category'); }} className="flex flex-col items-center gap-1.5">
+                <span className="flex h-[46px] w-[46px] items-center justify-center rounded-[16px] bg-ink/[0.06] text-ink2"><Add size={20} /></span>
+                <span className="text-[12px] text-ink2">Más</span>
               </Press>
             </div>
             {subParent && <SubcategoryBar key={subParent.id} parent={subParent} subs={subs} value={categoryId} onPick={pickCategory} />}
@@ -399,15 +406,14 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
           </>
         )}
 
-        {/* Nota: bloque propio y bien visible (se usa casi siempre) */}
-        <div className="px-1 pb-2.5 pt-5 text-[15px] font-semibold">Nota</div>
-        <div className="overflow-hidden rounded-[22px] bg-surface ring-accent/60 transition-shadow focus-within:ring-2">
+        {/* Nota: una fila, siempre a la vista */}
+        <div className="mt-4 overflow-hidden rounded-[18px] bg-surface ring-accent/60 transition-shadow focus-within:ring-2">
           <div className="flex items-center gap-3 px-4">
-            <span className={note ? 'text-accent' : 'text-ink3'}><Edit size={20} /></span>
+            <span className={note ? 'text-accent' : 'text-ink3'}><Edit size={18} /></span>
             <input
               type="text"
-              className="min-w-0 flex-1 bg-transparent py-4 text-[17px] outline-none placeholder:text-ink3"
-              placeholder="Mercadona, cena con Laura…"
+              className="min-w-0 flex-1 bg-transparent py-3 text-[16px] outline-none placeholder:text-ink3"
+              placeholder="Nota: Mercadona, cena con Laura…"
               value={note}
               onChange={(e) => { noteTouched.current = true; setNote(e.target.value); }}
               enterKeyHint="done"
@@ -432,62 +438,135 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
           </AnimatePresence>
         </div>
 
-        {/* Detalles: cuenta, fecha, repetir y foto */}
-        <div className="divide-hair mt-4 overflow-hidden rounded-[22px] bg-surface">
+        {/* Detalles: una fila cada uno, con lo de siempre a un toque */}
+        <div className="divide-hair mt-2.5 overflow-hidden rounded-[18px] bg-surface">
           {type !== 'transfer' && (
-            <div className="flex items-center gap-3 py-2 pl-4">
-              <span className="text-ink3"><WalletIcon size={18} /></span>
-              <span className="shrink-0 text-[15px] text-ink2">{type === 'debt' ? (dir === 'out' ? 'Sale de' : 'Entra en') : type === 'income' ? 'Entra en' : 'Pagado con'}</span>
+            <div className="flex items-center gap-2.5 py-1.5 pl-4">
+              <span className="w-[78px] shrink-0 whitespace-nowrap text-[14px] text-ink2">{type === 'debt' ? (dir === 'out' ? 'Sale de' : 'Entra en') : type === 'income' ? 'Entra en' : 'Pagado con'}</span>
               <div className="no-scrollbar flex min-w-0 flex-1 gap-1.5 overflow-x-auto pr-4">
                 {quickWallets.map((w) => (
-                  <Press key={w.id} scale={0.9} onClick={() => setWalletId(w.id)} className={`flex shrink-0 items-center gap-1.5 rounded-full py-1.5 pl-1.5 pr-3 text-[14px] font-semibold transition-colors ${walletId === w.id ? 'bg-ink text-paper' : 'bg-ink/[0.06] text-ink2'}`}>
+                  <Press key={w.id} scale={0.9} onClick={() => setWalletId(w.id)} className={`flex shrink-0 items-center gap-1.5 rounded-full py-1 pl-1 pr-3 text-[14px] font-semibold transition-colors ${walletId === w.id ? 'bg-ink text-paper' : 'bg-ink/[0.06] text-ink2'}`}>
                     <Tile icon={w.icon} color={w.color} size={22} active={walletId === w.id} />
                     {w.name}
                     {w.shared && <UserMultiple size={13} className="opacity-70" />}
                   </Press>
                 ))}
                 {wallets.length > quickWallets.length && (
-                  <Press scale={0.9} onClick={() => setSheet('wallet')} className="shrink-0 rounded-full bg-ink/[0.06] px-3 py-1.5 text-[14px] font-semibold text-ink2">Más</Press>
+                  <Press scale={0.9} onClick={() => setSheet('wallet')} className="shrink-0 rounded-full bg-ink/[0.06] px-3 py-1 text-[14px] font-semibold text-ink2">Más</Press>
                 )}
               </div>
             </div>
           )}
-          <div className="flex items-center gap-3 px-4 py-2">
-            <span className="text-ink3"><Calendar size={18} /></span>
-            <span className="flex-1 text-[15px] text-ink2">Fecha</span>
-            {[todayISO(), addDays(todayISO(), -1)].map((d, i) => (
-              <Press key={d} scale={0.9} onClick={() => setDate(d)} className={`rounded-full px-3 py-1.5 text-[14px] font-semibold transition-colors ${date === d ? 'bg-ink text-paper' : 'bg-ink/[0.06] text-ink2'}`}>
-                {i === 0 ? 'Hoy' : 'Ayer'}
+          <div className="flex items-center gap-2.5 py-1.5 pl-4 pr-4">
+            <span className="w-[78px] shrink-0 whitespace-nowrap text-[14px] text-ink2">Fecha</span>
+            <div className="flex flex-1 gap-1.5">
+              {[todayISO(), addDays(todayISO(), -1)].map((d, i) => (
+                <Press key={d} scale={0.9} onClick={() => setDate(d)} className={`rounded-full px-3 py-1 text-[14px] font-semibold transition-colors ${date === d ? 'bg-ink text-paper' : 'bg-ink/[0.06] text-ink2'}`}>
+                  {i === 0 ? 'Hoy' : 'Ayer'}
+                </Press>
+              ))}
+              <label className={`relative rounded-full px-3 py-1 text-[14px] font-semibold ${date !== todayISO() && date !== addDays(todayISO(), -1) ? 'bg-ink text-paper' : 'bg-ink/[0.06] text-ink2'}`}>
+                {date !== todayISO() && date !== addDays(todayISO(), -1) ? dayLabel(date).replace(/^[^,]+, /, '') : 'Otra'}
+                <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} className="date-overlay absolute inset-0 opacity-0" aria-label="Elegir fecha" />
+              </label>
+            </div>
+          </div>
+
+          {/* ¿De quién es este gasto? Todo tuyo, a medias, una parte o todo de otra persona (préstamo) */}
+          {type === 'expense' && isNew && (
+            <div className="py-1.5">
+              <div className="flex items-start gap-2.5 pl-4">
+                <span className="w-[78px] pt-1 shrink-0 whitespace-nowrap text-[14px] text-ink2">De quién</span>
+                <div className="flex min-w-0 flex-1 flex-wrap gap-1.5 pr-4">
+                  {SPLITS.map(([v, label]) => {
+                    const on = split === v;
+                    return (
+                      <Press
+                        key={v}
+                        scale={0.9}
+                        // Tocar otra vez la opción elegida la quita (vuelve a «Mío»)
+                        onClick={() => { blurActive(); setSplit(on && v !== 'mine' ? 'mine' : v); }}
+                        className={`shrink-0 rounded-full px-3 py-1 text-[14px] font-semibold transition-colors ${on ? 'bg-ink text-paper' : 'bg-ink/[0.06] text-ink2'}`}
+                      >
+                        {label}
+                      </Press>
+                    );
+                  })}
+                </div>
+              </div>
+              <AnimatePresence initial={false}>
+                {split !== 'mine' && (
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                    <div className="no-scrollbar flex items-center gap-1.5 overflow-x-auto px-4 pt-2">
+                      <span className="shrink-0 pr-1 text-[13px] text-ink3">Te lo debe</span>
+                      {quickPeople.map((p) => {
+                        const on = sharePerson === p.id;
+                        return (
+                          <Press key={p.id} scale={0.92} onClick={() => setSharePerson(on ? undefined : p.id)} className={`flex shrink-0 items-center gap-1.5 rounded-full py-1 pl-1 pr-3 text-[14px] font-semibold transition-colors ${on ? 'bg-ink text-paper' : 'bg-ink/[0.06] text-ink2'}`}>
+                            <Avatar name={p.name} color={p.color} size={22} />
+                            {p.name}
+                          </Press>
+                        );
+                      })}
+                      <Press scale={0.92} onClick={() => { blurActive(); setSheet('sharePerson'); }} className="flex shrink-0 items-center gap-1 rounded-full border border-dashed border-ink/25 px-3 py-1 text-[14px] font-semibold text-ink2">
+                        <Add size={14} /> {quickPeople.length ? 'Otra' : 'Elegir'}
+                      </Press>
+                    </div>
+                    {split === 'part' && (
+                      <div className="px-4 pt-2">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          enterKeyHint="done"
+                          className="w-full rounded-full bg-ink/[0.06] px-4 py-2 text-[16px] outline-none placeholder:text-ink3"
+                          placeholder="¿Cuánto te debe?"
+                          value={shareExpr}
+                          onChange={(e) => setShareExpr(e.target.value.replace(/[^\d.,]/g, ''))}
+                          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+                        />
+                      </div>
+                    )}
+                    {cents > 0 && share > 0 && (
+                      <p className="px-4 pt-2 text-[13px] text-ink2">
+                        {allOwed
+                          ? <>No es gasto tuyo: {personMap.get(sharePerson!)?.name ?? 'esa persona'} te deberá <span className="money font-semibold">{fmt(cents)}</span></>
+                          : <>Tu gasto <span className="money font-semibold">{fmt(cents - share)}</span> · {personMap.get(sharePerson!)?.name ?? 'Te'} te debe <span className="money font-semibold">{fmt(share)}</span></>}
+                      </p>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
+          {/* Repetir y foto, juntos en una fila */}
+          <div className="flex items-center gap-2 px-4 py-1.5">
+            {type !== 'debt' && (rec ? (
+              <Press scale={0.92} onClick={() => nav.push({ name: 'recurringEdit', id: rec.id! })} className="flex items-center gap-1.5 rounded-full bg-accent/10 px-3 py-1 text-[14px] font-semibold text-accent">
+                <Repeat size={15} /> {rec.active ? FREQ_LABEL[rec.frequency] : 'En pausa'}
+              </Press>
+            ) : (
+              <Press scale={0.92} onClick={() => { blurActive(); setSheet('repeat'); }} className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-[14px] font-semibold ${repeat ? 'bg-accent/10 text-accent' : 'bg-ink/[0.06] text-ink2'}`}>
+                <Repeat size={15} /> {repeat ? FREQ_LABEL[repeat] : 'Repetir'}
               </Press>
             ))}
-            <label className={`relative rounded-full px-3 py-1.5 text-[14px] font-semibold ${date !== todayISO() && date !== addDays(todayISO(), -1) ? 'bg-ink text-paper' : 'bg-ink/[0.06] text-ink2'}`}>
-              {date !== todayISO() && date !== addDays(todayISO(), -1) ? dayLabel(date).replace(/^[^,]+, /, '') : 'Otra'}
-              <input type="date" value={date} onChange={(e) => e.target.value && setDate(e.target.value)} className="date-overlay absolute inset-0 opacity-0" aria-label="Elegir fecha" />
-            </label>
+            {photoUrl ? (
+              <Press scale={0.92} onClick={() => setViewPhoto(true)} className="flex items-center gap-1.5 rounded-full bg-ink/[0.06] py-0.5 pl-0.5 pr-3 text-[14px] font-semibold text-ink2">
+                <img src={photoUrl} className="h-6 w-6 rounded-full object-cover" alt="Foto adjunta" /> Foto
+              </Press>
+            ) : (
+              <label className="flex items-center gap-1.5 rounded-full bg-ink/[0.06] px-3 py-1 text-[14px] font-semibold text-ink2">
+                <Camera size={15} /> Foto del ticket
+                <input type="file" accept="image/*" className="hidden" onChange={onPhoto} />
+              </label>
+            )}
           </div>
-          {type !== 'debt' && (rec ? (
-            <Row icon={<Repeat size={18} />} label="Se repite" onClick={() => nav.push({ name: 'recurringEdit', id: rec.id! })}>{rec.active ? FREQ_LABEL[rec.frequency] : 'En pausa'}</Row>
-          ) : (
-            <Row icon={<Repeat size={18} />} label="Repetir" onClick={() => setSheet('repeat')}>
-              <span className={repeat ? 'text-accent' : 'text-ink3'}>{repeat ? FREQ_LABEL[repeat] : 'No se repite'}</span>
-            </Row>
-          ))}
-          {photoUrl ? (
-            <Row icon={<Camera size={18} />} label="Foto" onClick={() => setViewPhoto(true)}>
-              <img src={photoUrl} className="h-8 w-8 rounded-lg object-cover" alt="Foto adjunta" />
-            </Row>
-          ) : (
-            <label className="block">
-              <Row icon={<Camera size={18} />} label="Foto del ticket"><span className="text-ink3">Añadir</span></Row>
-              <input type="file" accept="image/*" className="hidden" onChange={onPhoto} />
-            </label>
-          )}
         </div>
         {date > todayISO() && <p className="px-1 pt-2 text-[13px] text-ink3">Fecha futura: aparecerá en «Próximos» y no contará hasta ese día.</p>}
 
         {/* Cartera compartida: algo que no quieres que vea tu pareja */}
         {house && house.members.length > 1 && (wallet?.shared || toWallet?.shared) && (
-          <Press scale={0.99} onClick={() => setPriv((v) => !v)} className="mt-3 flex w-full items-center gap-3 rounded-[22px] bg-surface px-4 py-3.5 text-left">
+          <Press scale={0.99} onClick={() => setPriv((v) => !v)} className="mt-2.5 flex w-full items-center gap-3 rounded-[18px] bg-surface px-4 py-2.5 text-left">
             <span className={priv ? 'text-accent' : 'text-ink3'}><Locked size={18} /></span>
             <span className="flex-1">
               <span className="block text-[15px]">Solo para mí</span>
@@ -498,86 +577,20 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
             </span>
           </Press>
         )}
-
-        {/* ¿De quién es este gasto? Todo tuyo, a medias, una parte o todo de otra persona */}
-        {type === 'expense' && isNew && (
-          <div className="mt-3 rounded-[22px] bg-surface p-4">
-            <p className="text-[15px] font-semibold">¿De quién es este gasto?</p>
-            <p className="text-[12px] text-ink3">Si pagaste tú algo que no es (todo) tuyo, apunta quién te lo debe</p>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {SPLITS.map(([v, label]) => {
-                const on = split === v;
-                return (
-                  <Press
-                    key={v}
-                    scale={0.95}
-                    // Tocar otra vez la opción elegida la quita (vuelve a «Todo mío»)
-                    onClick={() => { blurActive(); setSplit(on ? 'mine' : v); }}
-                    className={`rounded-2xl px-3 py-2.5 text-[14px] font-semibold transition-colors ${on ? 'bg-ink text-paper' : 'bg-ink/[0.06] text-ink2'}`}
-                  >
-                    {label}
-                  </Press>
-                );
-              })}
-            </div>
-            <AnimatePresence initial={false}>
-              {split !== 'mine' && (
-                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                  <p className="pb-2 pt-4 text-[13px] font-medium text-ink2">¿Quién te lo debe?</p>
-                  <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4">
-                    {quickPeople.map((p) => {
-                      const on = sharePerson === p.id;
-                      return (
-                        <Press key={p.id} scale={0.92} onClick={() => setSharePerson(on ? undefined : p.id)} className={`flex shrink-0 items-center gap-1.5 rounded-full py-1.5 pl-1.5 pr-3 text-[14px] font-semibold transition-colors ${on ? 'bg-ink text-paper' : 'bg-ink/[0.06] text-ink2'}`}>
-                          <Avatar name={p.name} color={p.color} size={24} />
-                          {p.name}
-                        </Press>
-                      );
-                    })}
-                    <Press scale={0.92} onClick={() => { blurActive(); setSheet('sharePerson'); }} className="flex shrink-0 items-center gap-1 rounded-full border border-dashed border-ink/25 px-3 py-1.5 text-[14px] font-semibold text-ink2">
-                      <Add size={15} /> {quickPeople.length ? 'Otra' : 'Elegir persona'}
-                    </Press>
-                  </div>
-                  {split === 'part' && (
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      enterKeyHint="done"
-                      className="mt-3 w-full rounded-2xl bg-ink/[0.06] px-4 py-3 text-[16px] outline-none placeholder:text-ink3"
-                      placeholder="¿Cuánto te debe?"
-                      value={shareExpr}
-                      onChange={(e) => setShareExpr(e.target.value.replace(/[^\d.,]/g, ''))}
-                      onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-                    />
-                  )}
-                  {cents > 0 && share > 0 && (
-                    <p className="pt-3 text-[13px] leading-relaxed text-ink2">
-                      {allOwed
-                        ? <>No cuenta como gasto tuyo: {personMap.get(sharePerson!)?.name ?? 'esa persona'} te deberá <span className="money font-semibold">{fmt(cents)}</span>.</>
-                        : <>Tu gasto: <span className="money font-semibold">{fmt(cents - share)}</span> · {personMap.get(sharePerson!)?.name ?? 'Te'} te debe: <span className="money font-semibold">{fmt(share)}</span></>}
-                    </p>
-                  )}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        )}
       </div>
 
       {/* Con el teclado abierto: barra fina con «Listo» justo encima del teclado (el numérico del iPhone no
           tiene botón para cerrarlo) */}
-      {typing && (
+      {typing ? (
         <div className="flex items-center gap-2 border-t px-4 py-1.5 hair">
           <span className="flex-1 truncate text-[12px] font-medium text-ink3">{missing}</span>
           <Press scale={0.94} onClick={blurActive} className="rounded-full bg-ink/[0.07] px-4 py-1.5 text-[15px] font-semibold">Listo</Press>
         </div>
-      )}
-      {/* Guardar (se esconde mientras escribes, el de arriba sigue a mano) */}
-      {!typing && (
+      ) : (
         <div className="pb-safe border-t px-4 pt-2.5 hair">
-          <div className="mb-2 h-4 text-center text-[12px] font-medium text-ink3">{missing}</div>
-          <Press scale={0.97} onClick={save} className={`flex h-[54px] w-full items-center justify-center gap-2 rounded-full text-[17px] font-semibold transition-colors ${valid ? 'bg-accent text-white' : 'bg-ink/[0.08] text-ink3'}`}>
-            <Checkmark size={20} /> {isNew ? SAVE[type] : 'Guardar cambios'}
+          {/* Si falta algo, el propio botón lo dice */}
+          <Press scale={0.97} onClick={save} className={`mb-1 flex h-[50px] w-full items-center justify-center gap-2 rounded-full text-[16px] font-semibold transition-colors ${valid ? 'bg-accent text-white' : 'bg-ink/[0.08] text-ink3'}`}>
+            {valid ? <><Checkmark size={20} /> {isNew ? (allOwed ? 'Guardar préstamo' : SAVE[type]) : 'Guardar cambios'}</> : missing || SAVE[type]}
           </Press>
         </div>
       )}
@@ -741,17 +754,6 @@ export function Avatar({ name, color = '#6B6760', size = 40 }: { name?: string; 
     <span className="flex shrink-0 items-center justify-center rounded-full font-semibold text-white" style={{ width: size, height: size, background: name ? color : 'rgb(var(--ink) / 0.12)', fontSize: size * 0.42 }}>
       {name ? name.trim()[0]?.toUpperCase() : <UserMultiple size={size * 0.5} />}
     </span>
-  );
-}
-
-function Row({ icon, label, children, onClick }: { icon: ReactNode; label: string; children: ReactNode; onClick?: () => void }) {
-  return (
-    <Press scale={0.99} onClick={onClick} className="flex w-full items-center gap-3 px-4 py-3.5 text-left">
-      <span className="text-ink3">{icon}</span>
-      <span className="flex-1 text-[15px] text-ink2">{label}</span>
-      <span className="flex items-center gap-1 text-[15px] font-semibold">{children}</span>
-      {onClick && <ChevronRight size={16} className="text-ink3" />}
-    </Press>
   );
 }
 

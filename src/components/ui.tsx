@@ -194,11 +194,14 @@ export function Page({ title, onBack, right, children, footer, eyebrow }: {
  * lo que queda debajo del teclado no se puede alcanzar con el scroll. (En Android lo resuelve el viewport.)
  */
 function useKeyboardViewport() {
-  const [vp, setVp] = useState<{ top: number; height: number } | null>(null);
+  const [vp, setVp] = useState<{ top: number; height: number; kb: number } | null>(null);
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-    const update = () => setVp(window.innerHeight - vv.height > 120 ? { top: vv.offsetTop, height: vv.height } : null);
+    const update = () => {
+      const kb = window.innerHeight - vv.height;
+      setVp(kb > 120 ? { top: vv.offsetTop, height: vv.height, kb } : null);
+    };
     update();
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);
@@ -220,11 +223,11 @@ export function Sheet({ onClose, children, title, right, full }: { onClose: () =
   }
   const kb = useKeyboardViewport();
   return (
-    <div className="fixed inset-0" style={kb ? { top: kb.top, height: kb.height, bottom: 'auto' } : undefined}>
+    <div className="fixed inset-0" style={kb ? { top: kb.top, height: kb.height + kb.kb, bottom: 'auto' } : undefined}>
       <motion.div className="absolute inset-0 bg-black/35" style={{ opacity: backdrop }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
       <motion.div
         className={`absolute inset-x-0 bottom-0 flex flex-col rounded-t-[30px] bg-paper ${full ? 'top-[max(env(safe-area-inset-top),14px)]' : 'max-h-[88dvh]'}`}
-        style={{ y, ...(kb && !full ? { maxHeight: kb.height - 12 } : null) }}
+        style={{ y, ...(kb ? { paddingBottom: kb.kb, ...(full ? null : { maxHeight: kb.height - 12 + kb.kb }) } : null) }}
         initial={{ y: '100%' }}
         animate={{ y: 0 }}
         exit={{ y: '100%' }}
