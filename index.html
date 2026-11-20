@@ -42,6 +42,31 @@
       // Tras el primer frame (ya en el color del splash) empieza el fundido al color del tema
       requestAnimationFrame(function () { requestAnimationFrame(function () { document.documentElement.classList.remove('splash'); }); });
     </script>
+    <script>
+      // Los datos se empiezan a leer YA, mientras se descarga y arranca el JavaScript de la app (que tarda más
+      // que leerlos). Una sola lectura de todo; la app la usa para pintarse en el primer frame. Si la base de
+      // datos no existe todavía, no se crea aquí (de eso se encarga la app).
+      window.__ecoPreload = new Promise(function (done) {
+        try {
+          var stores = ['wallets', 'categories', 'transactions', 'recurring', 'budgets', 'settings', 'people'];
+          var req = indexedDB.open('eco');
+          req.onupgradeneeded = function () { req.transaction.abort(); };
+          req.onerror = req.onblocked = function () { done(null); };
+          req.onsuccess = function () {
+            var db = req.result, out = {}, left = stores.length;
+            db.onversionchange = function () { db.close(); };
+            try {
+              var tx = db.transaction(stores, 'readonly');
+              stores.forEach(function (s) {
+                tx.objectStore(s).getAll().onsuccess = function (e) { out[s] = e.target.result; if (!--left) done(out); };
+              });
+              tx.onabort = tx.onerror = function () { done(null); };
+              tx.oncomplete = function () { db.close(); };
+            } catch (e) { db.close(); done(null); }
+          };
+        } catch (e) { done(null); }
+      });
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

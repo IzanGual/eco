@@ -83,10 +83,17 @@ const saveOutbox = () => localStorage.setItem(LS_OUTBOX, JSON.stringify([...outb
 const sent = loadSet(LS_SENT);
 const saveSent = () => localStorage.setItem(LS_SENT, JSON.stringify([...sent]));
 
+// Cada cambio local lleva un número: si un registro cambia otra vez mientras se sube (con poca cobertura la subida
+// puede tardar mucho), no se quita de la cola al terminar y se vuelve a subir con lo último
+let changeSeq = 0;
+const changedAt = new Map<string, number>();
+
 let flushTimer: ReturnType<typeof setTimeout> | undefined;
 function enqueue(t: SharedTable, id: unknown) {
   if (!house || id == null) return;
-  outbox.add(`${t}:${id}`);
+  const k = `${t}:${id}`;
+  outbox.add(k);
+  changedAt.set(k, ++changeSeq);
   saveOutbox();
   clearTimeout(flushTimer);
   flushTimer = setTimeout(() => flush().catch(() => {}), 500);
@@ -168,12 +175,27 @@ async function serialize(t: SharedTable, rec: Record<string, unknown>) {
   return JSON.stringify(rest);
 }
 
-/** Sube los cambios pendientes. */
-export async function flush() {
-  if (!house || !outbox.size || !currentUser()) return;
+/** Sube los cambios pendientes (una sola subida a la vez; lo que llegue mientras tanto va en la siguiente). */
+let flushing: Promise<void> | null = null;
+let flushAgain = false;
+export function flush(): Promise<void> {
+  if (flushing) { flushAgain = true; return flushing; }
+  flushing = (async () => {
+    do {
+      flushAgain = false;
+      while (await flushBatch()) { /* hasta vaciar la cola */ }
+    } while (flushAgain);
+  })().finally(() => { flushing = null; });
+  return flushing;
+}
+
+/** Sube hasta 400 cambios. Devuelve true si aún queda algo por subir. */
+async function flushBatch(): Promise<boolean> {
+  if (!house || !outbox.size || !currentUser()) return false;
   const { fs } = await load();
   const { doc, writeBatch, serverTimestamp } = await import('firebase/firestore');
   const keys = [...outbox].slice(0, 400);
+  const seqs = keys.map((k) => changedAt.get(k));
   const batch = writeBatch(fs);
   let writes = 0;
   for (const k of keys) {
@@ -194,10 +216,14 @@ export async function flush() {
     }
   }
   if (writes) await batch.commit();
-  keys.forEach((k) => outbox.delete(k));
+  keys.forEach((k, i) => {
+    if (changedAt.get(k) !== seqs[i]) return; // cambió mientras subía: se queda para la siguiente
+    outbox.delete(k);
+    changedAt.delete(k);
+  });
   saveOutbox();
   saveSent();
-  if (outbox.size) await flush();
+  return outbox.size > 0;
 }
 
 // ---------- Escuchar los cambios de la pareja ----------
@@ -633,12 +659,19 @@ export function partnerName() {
 export function initSync() {
   onUser((u) => {
     if (!u) return stopListening();
-    // Primero se pregunta a la nube en qué espacio estás (aunque este móvil lo hubiera perdido); sin conexión,
-    // se sigue con lo que hay guardado
+    // Con lo que hay guardado en el móvil se empieza ya, sin esperar a la red (con poca cobertura la pregunta
+    // a la nube puede tardar mucho). A la vez se pregunta a la nube en qué espacio estás de verdad (aunque este
+    // móvil lo hubiera perdido) y, si cambia algo, se vuelve a arrancar.
+    const bound = getHouseUser();
+    const startedLocal = !!house && (!bound || bound.uid === u.uid);
+    if (startedLocal) start().catch(() => {});
     reconcile(u)
-      .then((changed) => start(changed), () => start())
+      .then((changed) => {
+        if (problem) return stopListening();
+        if (changed || !startedLocal) return start(changed);
+      }, () => { if (!startedLocal) return start(); })
       .catch(() => {});
-  });
+  }, { init: false });
   window.addEventListener('online', () => flush().catch(() => {}));
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && flush().catch(() => {}));
 }

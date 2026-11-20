@@ -12,6 +12,7 @@ import { Budgets, BudgetEdit } from './screens/Budgets';
 import { useData } from './store';
 import { isStandalone, shouldShowLanding } from './install';
 import { applyUpdate, useUpdateReady } from './update';
+import './join'; // enlace de invitación de pareja: ?unirse=CODIGO
 
 // Lo que no hace falta para abrir la app se descarga solo cuando se usa
 const Stats = lazy(() => import('./screens/Stats').then((m) => ({ default: m.Stats })));
@@ -33,12 +34,6 @@ import type { TxType } from './db';
 
 type Tab = 'home' | 'txs' | 'stats' | 'settings';
 
-// Enlace de invitación de pareja: ?unirse=CODIGO (se guarda hasta que haya sesión y bienvenida)
-const joinParam = new URLSearchParams(location.search).get('unirse');
-if (joinParam) {
-  localStorage.setItem('eco:pendingJoin', joinParam.toUpperCase());
-  history.replaceState(null, '', location.pathname);
-}
 
 function initialStack(): Screen[] {
   // Atajo: /?nuevo=gasto | ingreso | transferencia abre directamente el formulario

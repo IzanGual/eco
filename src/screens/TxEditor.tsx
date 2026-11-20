@@ -5,7 +5,7 @@ import {
   , Locked
 } from '@carbon/icons-react';
 import { db, type Category, type DebtDir, type Frequency, type Transaction, type TxType } from '../db';
-import { addDays, centsToInput, compressImage, dayLabel, FREQ_LABEL, fmt, nextOccurrence, parseAmount, personBalances, processRecurring, todayISO } from '../lib';
+import { addDays, centsToInput, compressImage, dayLabel, findCategory, FREQ_LABEL, fmt, nextOccurrence, parseAmount, personBalances, processRecurring, todayISO } from '../lib';
 import { useData } from '../store';
 import { useNav } from '../nav';
 import { useHousehold } from '../useHousehold';
@@ -57,6 +57,9 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
   const [recurringId, setRecurringId] = useState<number | undefined>();
   const [personId, setPersonId] = useState<number | undefined>(defaults?.personId);
   const [dir, setDir] = useState<DebtDir>(defaults?.dir ?? 'out');
+  // Si te devuelven más de lo que te debían (o pagas más de lo que debías): ¿la diferencia es tuya o sigue siendo préstamo?
+  const [excessMode, setExcessMode] = useState<'keep' | 'debt' | null>(null);
+  const origPersonId = useRef<number | undefined>(undefined);
   // ¿De quién es el gasto? Todo tuyo, a medias, una parte o todo de otra persona (entonces es un préstamo)
   const [split, setSplit] = useState<Split>('mine');
   const [priv, setPriv] = useState(false);
@@ -85,6 +88,7 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
       setRecurringId(t.recurringId);
       setPriv(!!t.private);
       setPersonId(t.personId);
+      origPersonId.current = t.personId;
       setDir(t.dir ?? 'out');
       setLoaded(true);
     });
@@ -214,6 +218,15 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
     if (isNew && !expr) amountRef.current?.focus({ preventScroll: true });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Préstamos: lo que había pendiente con esa persona antes de este movimiento (positivo = te debe)
+  const owedBefore = type === 'debt' && personId != null && isNew ? personBalances(txs).get(personId) ?? 0 : 0;
+  // Lo que pasa de saldar la deuda: te devuelve 60 cuando te debía 50 → 10 de más
+  const excess = type !== 'debt' || !isNew || personId == null ? 0
+    : dir === 'in' ? (owedBefore > 0 && cents > owedBefore ? cents - owedBefore : 0)
+    : (owedBefore < 0 && cents > -owedBefore ? cents + owedBefore : 0);
+  // Por defecto: lo que te devuelven de más es tuyo (ingreso); lo que pagas de más, un préstamo nuevo
+  const keepExcess = excess > 0 && (excessMode ?? (dir === 'in' ? 'keep' : 'debt')) === 'keep';
+
   const missing =
     cents <= 0 ? 'Escribe el importe'
     : type === 'transfer' ? (toWalletId == null || toWalletId === walletId ? 'Elige a qué cartera va' : '')
@@ -250,7 +263,7 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
       walletId: walletId!,
       toWalletId: type === 'transfer' ? toWalletId : undefined,
       categoryId: type === 'transfer' || type === 'debt' ? undefined : categoryId,
-      personId: type === 'debt' ? personId : undefined,
+      personId: type === 'debt' ? personId : type === 'transfer' ? undefined : origPersonId.current,
       dir: type === 'debt' ? dir : undefined,
       date,
       note: note.trim(),
@@ -260,12 +273,26 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
       createdAt: Date.now()
     };
     localStorage.setItem(LAST_WALLET, String(walletId));
+    // La diferencia que te quedas (o regalas) sale del préstamo y se apunta como ingreso (o gasto) aparte
+    const extra: Transaction | null = keepExcess ? {
+      type: dir === 'in' ? 'income' : 'expense',
+      amount: excess,
+      walletId: walletId!,
+      categoryId: dir === 'in' ? await findCategory('income', ['Otros ingresos', 'Extra', 'Regalos']) : await findCategory('expense', ['Regalos', 'Otros']),
+      personId,
+      date,
+      note: note.trim() || (dir === 'in' ? `De más de ${personMap.get(personId!)?.name ?? 'un préstamo'}` : `Regalo a ${personMap.get(personId!)?.name ?? 'alguien'}`),
+      private: priv || undefined,
+      createdAt: Date.now()
+    } : null;
+    if (extra) tx.amount = cents - excess;
     if (isNew) {
       if (repeat) {
         const { photo: _p, createdAt: _c, recurringId: _r, date: _d, ...tpl } = tx;
         tx.recurringId = await db.recurring.add({ ...tpl, frequency: repeat, nextDate: nextOccurrence(date, repeat), active: true });
       }
-      await db.transactions.add(tx);
+      if (extra) await db.transaction('rw', db.transactions, async () => { await db.transactions.add(tx); await db.transactions.add(extra); });
+      else await db.transactions.add(tx);
       if (splitting && !allOwed && sharePerson != null) {
         await db.transactions.add({
           type: 'debt', dir: 'out', personId: sharePerson, amount: share, walletId: walletId!, date,
@@ -273,7 +300,9 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
         });
       }
       await processRecurring();
-      toast(allOwed ? `${personMap.get(sharePerson!)?.name ?? 'Esa persona'} te debe ${fmt(cents)}` : type === 'expense' ? 'Gasto guardado' : type === 'income' ? 'Ingreso guardado' : type === 'debt' ? 'Préstamo guardado' : 'Transferencia guardada');
+      toast(allOwed ? `${personMap.get(sharePerson!)?.name ?? 'Esa persona'} te debe ${fmt(cents)}`
+        : extra ? (dir === 'in' ? `En paz, y ${fmt(excess)} de ingreso` : `En paz, y ${fmt(excess)} de gasto`)
+        : type === 'expense' ? 'Gasto guardado' : type === 'income' ? 'Ingreso guardado' : type === 'debt' ? 'Préstamo guardado' : 'Transferencia guardada');
     } else {
       if (repeat && recurringId == null) {
         const { photo: _p, createdAt: _c, recurringId: _r, date: _d, ...tpl } = tx;
@@ -310,7 +339,7 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
     if (type !== 'debt' || personId == null) return null;
     const cur = personBalances(txs).get(personId) ?? 0;
     const editing = !isNew ? 0 : 1;
-    const after = cur + editing * (dir === 'out' ? cents : -cents);
+    const after = keepExcess ? 0 : cur + editing * (dir === 'out' ? cents : -cents);
     return { cur, after };
   })();
 
@@ -409,13 +438,34 @@ export function TxEditor({ id, type: initialType, defaults, repeat: initialRepea
               id="debtdir"
               className="mt-2.5"
               value={dir}
-              onChange={setDir}
+              onChange={(d) => { setDir(d); setExcessMode(null); }}
               options={[{ value: 'out', label: 'Le dejo / pago yo' }, { value: 'in', label: 'Me devuelve / me deja' }]}
             />
+            {excess > 0 && (
+              <div className="mt-2.5 rounded-[18px] bg-surface p-3">
+                <p className="px-1 pb-2 text-[14px]">
+                  {dir === 'in'
+                    ? <>Te devuelve <span className="money font-semibold">{fmt(excess)}</span> más de lo que te debía. ¿Y la diferencia?</>
+                    : <>Le pagas <span className="money font-semibold">{fmt(excess)}</span> más de lo que le debías. ¿Y la diferencia?</>}
+                </p>
+                <Segmented
+                  id="excess"
+                  value={keepExcess ? 'keep' : 'debt'}
+                  onChange={setExcessMode}
+                  options={dir === 'in'
+                    ? [{ value: 'keep', label: 'Me la quedo' }, { value: 'debt', label: 'Se la devolveré' }]
+                    : [{ value: 'debt', label: 'Me la devolverá' }, { value: 'keep', label: 'Se la regalo' }]}
+                />
+              </div>
+            )}
             {debtAfter && (
               <p className="px-1 pt-2.5 text-[13px] text-ink2">
-                {debtAfter.after === 0 ? 'Quedaréis en paz.' : debtAfter.after > 0 ? <>Después, {person?.name} te deberá <span className="money font-semibold">{fmt(debtAfter.after)}</span>.</> : <>Después, le deberás <span className="money font-semibold">{fmt(-debtAfter.after)}</span> a {person?.name}.</>}
-                {' '}No cuenta como gasto ni ingreso.
+                {keepExcess
+                  ? <>Quedaréis en paz y <span className="money font-semibold">{fmt(excess)}</span> {dir === 'in' ? 'cuentan como ingreso tuyo' : 'cuentan como gasto (un regalo)'}.</>
+                  : <>
+                    {debtAfter.after === 0 ? 'Quedaréis en paz.' : debtAfter.after > 0 ? <>Después, {person?.name} te deberá <span className="money font-semibold">{fmt(debtAfter.after)}</span>.</> : <>Después, le deberás <span className="money font-semibold">{fmt(-debtAfter.after)}</span> a {person?.name}.</>}
+                    {' '}No cuenta como gasto ni ingreso.
+                  </>}
               </p>
             )}
           </>

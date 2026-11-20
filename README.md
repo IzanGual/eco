@@ -16,6 +16,7 @@ Funciones planificadas: [FUNCIONES.md](FUNCIONES.md).
 - Exportar a CSV (Excel), copia de seguridad y restaurarla
 - Modo claro («Papel») y oscuro («Tinta»), y modo privacidad que difumina las cifras
 - Préstamos con personas («Mamá te debe 150 €»), sin contar como gasto ni ingreso, y gastos que no son (todo) tuyos: «¿De quién es este gasto?» → a medias, una parte o «Me lo deben todo»
+- Si te devuelven más de lo que te debían, eliges qué es la diferencia: «Me la quedo» (cuenta como ingreso) o «Se la devolveré» (sigue como préstamo). Lo mismo al pagar de más. Y en la ficha de la persona, «No tengo que devolverlo · contar como ingreso» arregla lo ya apuntado
 - Resúmenes semanales y mensuales en formato historia
 - Importar CSV desde Soldi, Excel o el banco (detecta columnas, crea categorías y salta duplicados)
 
@@ -59,8 +60,17 @@ ya con tu sesión (durante la hora siguiente).
 1. Publicar la carpeta `dist/` en un hosting con HTTPS (Cloudflare Pages, Vercel o Netlify; todos gratis).
 2. Abre la URL en el móvil. Si no está instalada, verás la **landing con el botón «Instalar Eco»**:
    - **Android (Chrome)**: el botón abre el diálogo de instalación directamente.
-   - **iPhone**: Apple no deja instalar con un botón, así que se abre una guía animada de 3 pasos (Compartir → Añadir a pantalla de inicio → Añadir).
-   - **Dentro de Instagram, WhatsApp…**: pide abrirla en Safari o Chrome.
+   - **iPhone**: los pasos se ven ya en la landing, con una flecha señalando el botón de Safari (y «Verlo paso a paso» para la guía con dibujos).
+   - **Dentro de Instagram, WhatsApp…**: botón «Abrir en Safari» / «Abrir en Chrome» de un toque (`x-safari-https://` en iPhone, `intent://` en Android).
+   - La invitación de pareja (`?unirse=CODIGO`) viaja en una cookie, así que en iPhone la app instalada la recibe ya puesta.
+
+### Arranque rápido y sin cobertura
+
+- `index.html` empieza a leer los datos de IndexedDB antes de que cargue el JavaScript; la app se pinta con ellos en el primer frame.
+- Las fuentes se precargan con el HTML.
+- Firebase solo se carga al arrancar si había sesión; si no, cuando abres algo que la usa.
+- Sin red todo funciona igual: lo compartido con la pareja se queda en cola y se sube al volver la conexión (una subida a la vez,
+  sin perder cambios hechos mientras subía), y la copia en la nube espera a que haya conexión.
 
 > Los datos se guardan **en cada iPhone** (IndexedDB). La sincronización entre los dos llega en la fase 2 (Supabase).
 > Mientras tanto, conviene hacer copias desde Ajustes.

@@ -9,6 +9,7 @@ import { APP_VERSION, applyUpdate, checkForUpdate, useUpdateReady, versionLabel 
 import { useHousehold } from '../useHousehold';
 import { useData } from '../store';
 import { useNav } from '../nav';
+import { clearPendingJoin } from '../join';
 import { fmt, walletBalances } from '../lib';
 import { Page, Press, Tile, confirmDialog, spring, toast } from '../components/ui';
 
@@ -59,7 +60,7 @@ export function Couple({ code: initialCode }: { code?: string }) {
       });
       if (!ok) return;
       await joinHousehold(c);
-      localStorage.removeItem('eco:pendingJoin');
+      clearPendingJoin();
       toast('Conectados');
     });
   }

@@ -116,7 +116,7 @@ export function Landing({ onContinue }: { onContinue: () => void }) {
                 <p className="text-[14px] text-ink2">Ábrela desde tu pantalla de inicio.</p>
               </motion.div>
             ) : p.inApp ? (
-              <InAppNotice key="inapp" />
+              <InAppNotice key="inapp" p={p} />
             ) : (
               <motion.div key={user ? 'cta-user' : 'cta'} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
                 {cloudEnabled && p.mobile && !user ? (
@@ -126,7 +126,7 @@ export function Landing({ onContinue }: { onContinue: () => void }) {
                       <GoogleG /> {busy ? 'Conectando…' : 'Entrar con Google e instalar'}
                     </Press>
                     <p className="mt-2.5 text-center text-[13px] text-ink3">Usa la cuenta que ya tienes en el móvil. Así la app se abrirá con tu sesión iniciada.</p>
-                    <button onClick={install} className="mt-1 w-full py-2 text-center text-[14px] font-semibold text-ink2">Instalar sin cuenta</button>
+                    <button onClick={install} className="mt-1 w-full py-2 text-center text-[14px] font-semibold text-ink2">{p.ios ? 'Ver cómo instalar sin cuenta' : 'Instalar sin cuenta'}</button>
                   </>
                 ) : (
                 <>
@@ -136,12 +136,17 @@ export function Landing({ onContinue }: { onContinue: () => void }) {
                     Hola, {user.name.split(' ')[0] || user.email}. Ahora instálala.
                   </div>
                 )}
+                {p.ios ? (
+                  // En iPhone no hay botón que instale: los pasos se ven ya, sin tener que buscarlos
+                  <InlineSteps p={p} onMore={() => setGuide(true)} />
+                ) : (
                 <Press scale={0.97} onClick={install} className="relative flex h-[60px] w-full items-center justify-center gap-2.5 overflow-hidden rounded-full bg-accent text-[18px] font-semibold text-white shadow-[0_14px_30px_-8px_rgb(var(--accent)/0.6)]">
                   <motion.span className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/25 to-transparent" initial={{ x: '-150%' }} animate={{ x: '350%' }} transition={{ repeat: Infinity, duration: 2.6, ease: 'easeInOut', repeatDelay: 1.2 }} />
                   <Download size={22} /> Instalar Eco
                 </Press>
+                )}
                 <p className="mt-3 text-center text-[13px] text-ink3">
-                  {p.ios ? 'Gratis · Sin App Store · Ocupa menos de 1 MB' : p.android ? 'Gratis · Sin Play Store · Ocupa menos de 1 MB' : 'Ábrela en tu móvil para instalarla'}
+                  {p.ios ? 'Gratis · Sin App Store · Ocupa menos de 2 MB' : p.android ? 'Gratis · Sin Play Store · Ocupa menos de 2 MB' : 'Ábrela en tu móvil para instalarla'}
                 </p>
                 </>
                 )}
@@ -156,50 +161,103 @@ export function Landing({ onContinue }: { onContinue: () => void }) {
   );
 }
 
-function InAppNotice() {
+function InAppNotice({ p }: { p: ReturnType<typeof platform> }) {
   const [copied, setCopied] = useState(false);
+  // Se conserva la invitación de pareja (si la hay) para que llegue al navegador
+  const join = localStorage.getItem('eco:pendingJoin');
+  const url = `${location.origin}${location.pathname}${join ? `?unirse=${join}` : ''}`;
+  const bare = url.replace(/^https?:\/\//, '');
+  // iPhone: x-safari-https:// abre Safari desde Instagram, WhatsApp, Gmail… · Android: intent:// abre Chrome
+  const open = p.ios
+    ? `x-safari-https://${bare}`
+    : p.android ? `intent://${bare}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(url)};end` : null;
+  const browser = p.ios ? 'Safari' : 'Chrome';
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="rounded-[22px] bg-surface p-5">
-      <p className="font-serif text-[22px] leading-tight">Ábrela en tu navegador</p>
-      <p className="mt-1.5 text-[14px] text-ink2">Desde aquí no se puede instalar. Toca ··· y elige «Abrir en Safari» (o en Chrome), o copia el enlace.</p>
-      <Press scale={0.97} onClick={async () => { await navigator.clipboard?.writeText(location.href.split('?')[0]); setCopied(true); }} className="btn-ink mt-4 w-full">
-        {copied ? <><Checkmark size={18} /> Copiado</> : <><Copy size={18} /> Copiar enlace</>}
+      <p className="font-serif text-[22px] leading-tight">Ábrela en {browser}</p>
+      <p className="mt-1.5 text-[14px] text-ink2">Desde esta app no se puede instalar. Un toque y seguimos en {browser}.</p>
+      {open && (
+        <a href={open} className="mt-4 flex h-[56px] w-full items-center justify-center gap-2 rounded-full bg-accent text-[17px] font-semibold text-white">
+          <Launch size={20} /> Abrir en {browser}
+        </a>
+      )}
+      <Press scale={0.97} onClick={async () => { await navigator.clipboard?.writeText(url); setCopied(true); }} className={`${open ? 'btn-soft mt-2' : 'btn-ink mt-4'} w-full`}>
+        {copied ? <><Checkmark size={18} /> Copiado: pégalo en {browser}</> : <><Copy size={18} /> Copiar enlace</>}
       </Press>
     </motion.div>
   );
 }
 
-/** Guía animada: en iPhone no hay botón de instalar, así que señalamos el de Compartir. */
-/** Guía animada: en iPhone no hay botón de instalar, así que señalamos dónde tocar según el navegador. */
-function InstallGuide({ p, onClose }: { p: ReturnType<typeof platform>; onClose: () => void }) {
+type Where = 'bottom-right' | 'bottom' | 'top-right';
+type Step = { title: string; text: string; short: string; icon: React.ReactNode };
+
+/** Los pasos para instalar en este móvil y dónde está el botón del navegador. */
+function installSteps(p: ReturnType<typeof platform>): { steps: Step[]; where: Where } {
   const box = (c: React.ReactNode) => <span className="flex h-8 min-w-8 items-center justify-center rounded-[9px] border-[1.5px] border-current px-1 text-[13px] font-bold">{c}</span>;
-  const add = { title: 'Añadir a pantalla de inicio', text: 'Si no la ves, baja en el menú o toca «Ver más».', icon: box(<Add size={18} />) };
-  const done = { title: 'Pulsa «Añadir»', text: 'Arriba a la derecha. Eco aparecerá con su icono, como una app más.', icon: <Logo size={32} /> };
+  const add = { title: 'Añadir a pantalla de inicio', short: '«Añadir a pantalla de inicio»', text: 'Si no la ves, baja en el menú o toca «Ver más».', icon: box(<Add size={18} />) };
+  const done = { title: 'Pulsa «Añadir»', short: '«Añadir», arriba a la derecha', text: 'Arriba a la derecha. Eco aparecerá con su icono, como una app más.', icon: <Logo size={32} /> };
   // Dónde está el botón: Safari 26+ lo esconde en «···» (abajo a la derecha); Chrome en iPhone, arriba a la derecha
-  const where: 'bottom-right' | 'bottom' | 'top-right' = !p.ios ? 'top-right' : p.crios ? 'top-right' : p.safariVersion >= 26 ? 'bottom-right' : 'bottom';
+  const where: Where = !p.ios ? 'top-right' : p.crios ? 'top-right' : p.safariVersion >= 26 ? 'bottom-right' : 'bottom';
   const steps = !p.ios
     ? [
-        { title: 'Abre el menú del navegador', text: 'Los tres puntos, arriba a la derecha.', icon: <span className="text-[22px] font-bold leading-none">⋮</span> },
-        { title: 'Instalar aplicación', text: 'O «Añadir a pantalla de inicio».', icon: <Launch size={22} /> },
-        { title: 'Confirma', text: 'Eco aparecerá con su icono, como una app más.', icon: <Logo size={32} /> }
+        { title: 'Abre el menú del navegador', short: 'Menú ⋮, arriba a la derecha', text: 'Los tres puntos, arriba a la derecha.', icon: <span className="text-[22px] font-bold leading-none">⋮</span> },
+        { title: 'Instalar aplicación', short: '«Instalar aplicación»', text: 'O «Añadir a pantalla de inicio».', icon: <Launch size={22} /> },
+        { title: 'Confirma', short: 'Confirma', text: 'Eco aparecerá con su icono, como una app más.', icon: <Logo size={32} /> }
       ]
     : where === 'bottom-right'
       ? [
-          { title: 'Toca los tres puntos', text: 'Abajo a la derecha, en la barra de Safari (junto a la dirección).', icon: box(<Dots />) },
-          { title: 'Toca Compartir', text: 'El cuadrado con la flecha hacia arriba.', icon: <ShareGlyph /> },
+          { title: 'Toca los tres puntos', short: '«···», abajo a la derecha', text: 'Abajo a la derecha, en la barra de Safari (junto a la dirección).', icon: box(<Dots />) },
+          { title: 'Toca Compartir', short: 'Compartir', text: 'El cuadrado con la flecha hacia arriba.', icon: <ShareGlyph /> },
           add,
           done
         ]
       : [
-          { title: 'Toca Compartir', text: where === 'top-right' ? 'Arriba a la derecha, en la barra de direcciones.' : 'El cuadrado con la flecha, en la barra de abajo.', icon: <ShareGlyph /> },
+          { title: 'Toca Compartir', short: where === 'top-right' ? 'Compartir, arriba a la derecha' : 'Compartir, en la barra de abajo', text: where === 'top-right' ? 'Arriba a la derecha, en la barra de direcciones.' : 'El cuadrado con la flecha, en la barra de abajo.', icon: <ShareGlyph /> },
           add,
           done
         ];
+  return { steps, where };
+}
+
+/** Flecha que señala el botón del navegador. */
+function PointArrow({ where }: { where: Where }) {
   const arrow = {
     'bottom-right': 'bottom-1 right-6 justify-end',
     bottom: 'bottom-1 inset-x-0 justify-center',
     'top-right': 'top-[max(env(safe-area-inset-top),6px)] right-4 justify-end rotate-180'
   }[where];
+  return (
+    <motion.div className={`pointer-events-none fixed z-[60] flex text-accent ${arrow}`} initial={{ opacity: 0 }} animate={{ opacity: 1, y: where === 'top-right' ? [0, -10, 0] : [0, 10, 0] }} exit={{ opacity: 0 }} transition={{ y: { repeat: Infinity, duration: 1.1 }, delay: 0.6 }}>
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4v15M5 12l7 7 7-7" /></svg>
+    </motion.div>
+  );
+}
+
+/** iPhone: los pasos, en pequeño, directamente en la landing (y la flecha ya señalando dónde tocar). */
+function InlineSteps({ p, onMore }: { p: ReturnType<typeof platform>; onMore: () => void }) {
+  const { steps, where } = installSteps(p);
+  return (
+    <>
+      <div className="rounded-[22px] bg-surface p-4">
+        <p className="flex items-center gap-2 text-[16px] font-semibold"><Download size={18} className="text-accent" /> Instálala en {steps.length} toques</p>
+        <ol className="mt-2.5 space-y-2">
+          {steps.map((st, i) => (
+            <motion.li key={st.title} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 + i * 0.1 }} className="flex items-center gap-3 text-[15px]">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent text-[13px] font-bold text-white">{i + 1}</span>
+              {st.short}
+            </motion.li>
+          ))}
+        </ol>
+        <button onClick={onMore} className="mt-2 text-[13px] font-semibold text-ink3">¿No lo encuentras? Verlo paso a paso</button>
+      </div>
+      <PointArrow where={where} />
+    </>
+  );
+}
+
+/** Guía animada: en iPhone no hay botón de instalar, así que señalamos dónde tocar según el navegador. */
+function InstallGuide({ p, onClose }: { p: ReturnType<typeof platform>; onClose: () => void }) {
+  const { steps, where } = installSteps(p);
   return (
     <>
       <Sheet onClose={onClose} title={`Instalar en ${steps.length} toques`}>
@@ -218,11 +276,7 @@ function InstallGuide({ p, onClose }: { p: ReturnType<typeof platform>; onClose:
         </div>
       </Sheet>
       {/* Flecha que señala el botón del navegador */}
-      {p.ios && (
-        <motion.div className={`pointer-events-none fixed z-[60] flex text-accent ${arrow}`} initial={{ opacity: 0 }} animate={{ opacity: 1, y: where === 'top-right' ? [0, -10, 0] : [0, 10, 0] }} exit={{ opacity: 0 }} transition={{ y: { repeat: Infinity, duration: 1.1 }, delay: 0.6 }}>
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4v15M5 12l7 7 7-7" /></svg>
-        </motion.div>
-      )}
+      {p.ios && <PointArrow where={where} />}
     </>
   );
 }

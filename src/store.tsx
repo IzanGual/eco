@@ -1,8 +1,33 @@
-import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import Dexie, { liveQuery } from 'dexie';
 import { db, DEFAULT_SETTINGS, type AppSettings, type Category, type Person, type Recurring, type Transaction, type Wallet, type Budget } from './db';
 import { setCurrency } from './lib';
 import { scheduleBackup } from './cloud';
+import { preloaded, preloadFresh } from './preload';
+
+/**
+ * Consulta en vivo que arranca con los datos precargados por index.html (así la app se pinta en el primer frame).
+ * Si nadie ha escrito desde la precarga, la primera respuesta es idéntica y se descarta: sin un segundo render.
+ */
+function useLive<T>(query: () => Promise<T>, initial: T | undefined): T | undefined {
+  const [value, setValue] = useState(initial);
+  useEffect(() => {
+    let first = initial !== undefined;
+    const sub = liveQuery(query).subscribe({
+      next: (v) => {
+        if (first && preloadFresh()) { first = false; return; }
+        first = false;
+        setValue(v);
+      },
+      error: () => {}
+    });
+    return () => sub.unsubscribe();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  return value;
+}
+
+// Copia automática en la nube tras cada cambio en la base de datos (si hay sesión)
+Dexie.on('storagemutated', () => scheduleBackup());
 
 interface Data {
   wallets: Wallet[]; // sin archivadas
@@ -21,13 +46,14 @@ interface Data {
 const Ctx = createContext<Data | null>(null);
 
 export function DataProvider({ children }: { children: ReactNode }) {
-  const allWallets = useLiveQuery(() => db.wallets.orderBy('order').toArray());
-  const categories = useLiveQuery(() => db.categories.orderBy('order').toArray());
-  const txs = useLiveQuery(() => db.transactions.orderBy('date').reverse().toArray());
-  const recurring = useLiveQuery(() => db.recurring.toArray());
-  const budgets = useLiveQuery(() => db.budgets.orderBy('order').toArray());
-  const settingRows = useLiveQuery(() => db.settings.toArray());
-  const people = useLiveQuery(() => db.people.orderBy('name').toArray());
+  const pre = preloaded();
+  const allWallets = useLive(() => db.wallets.orderBy('order').toArray(), pre?.wallets);
+  const categories = useLive(() => db.categories.orderBy('order').toArray(), pre?.categories);
+  const txs = useLive(() => db.transactions.orderBy('date').reverse().toArray(), pre?.transactions);
+  const recurring = useLive(() => db.recurring.toArray(), pre?.recurring);
+  const budgets = useLive(() => db.budgets.orderBy('order').toArray(), pre?.budgets);
+  const settingRows = useLive(() => db.settings.toArray(), pre?.settings);
+  const people = useLive(() => db.people.orderBy('name').toArray(), pre?.people);
 
   const settings = useMemo<AppSettings>(() => {
     const s: Record<string, unknown> = { ...DEFAULT_SETTINGS };
@@ -74,18 +100,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
     };
   }, [allWallets, categories, txs, recurring, budgets, settingRows, settings, people]);
 
-  // Copia automática en la nube tras cada cambio (si hay sesión)
-  const firstLoad = useRef(true);
-  useEffect(() => {
-    if (!value) return;
-    if (firstLoad.current) { firstLoad.current = false; return; }
-    scheduleBackup();
-  }, [value]);
-
   // Con los datos ya pintados, la capa de arranque de index.html se desvanece encima de la app
   const ready = !!value;
   useEffect(() => {
     if (!ready) return;
+    performance.mark?.('eco:ready'); // cuánto tarda en estar lista (se ve en las herramientas del navegador)
     const boot = document.getElementById('boot');
     if (!boot) return;
     requestAnimationFrame(() => requestAnimationFrame(() => {

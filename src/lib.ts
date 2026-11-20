@@ -242,6 +242,17 @@ export function totals(txs: Transaction[]) {
   return { income, expense, net: income - expense };
 }
 
+/** Primera categoría principal de ese tipo cuyo nombre esté en la lista (por orden de preferencia); si no, la primera. */
+export async function findCategory(type: 'income' | 'expense', names: string[]) {
+  const roots = (await db.categories.where('type').equals(type).toArray()).filter((c) => c.parentId == null).sort((a, b) => a.order - b.order);
+  const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  for (const n of names) {
+    const hit = roots.find((c) => same(c.name, n));
+    if (hit) return hit.id;
+  }
+  return roots[0]?.id;
+}
+
 /** Id de la categoría principal (si es subcategoría, devuelve la madre). */
 export function rootCategoryId(catId: number | undefined, cats: Map<number, Category>) {
   if (catId == null) return undefined;

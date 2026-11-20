@@ -11,6 +11,20 @@ export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(new Date().toISOString().slice(0, 16)) },
   plugins: [
     react(),
+    // Las dos fuentes de la app se piden junto con el HTML, no cuando ya hay texto en pantalla (sin parpadeo de letra)
+    {
+      name: 'eco-preload-fonts',
+      enforce: 'post',
+      transformIndexHtml: {
+        order: 'post',
+        handler(_html, ctx) {
+          if (!ctx.bundle) return [];
+          return Object.keys(ctx.bundle)
+            .filter((f) => /instrument-(sans-latin-wght|serif-latin-400)-normal-[\w-]+\.woff2$/.test(f))
+            .map((f) => ({ tag: 'link', attrs: { rel: 'preload', as: 'font', type: 'font/woff2', href: base + f, crossorigin: '' }, injectTo: 'head' as const }));
+        }
+      }
+    },
     VitePWA({
       registerType: 'prompt',
       workbox: {

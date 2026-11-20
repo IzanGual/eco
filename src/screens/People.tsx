@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Add, ArrowDownLeft, ArrowUpRight, ChevronRight, TrashCan } from '@carbon/icons-react';
 import { db } from '../db';
-import { debtSummary, fmt, personBalances, todayISO } from '../lib';
+import { debtSummary, findCategory, fmt, personBalances, todayISO } from '../lib';
 import { useData } from '../store';
 import { useNav } from '../nav';
 import { TxList } from '../components/TxList';
@@ -81,17 +81,36 @@ export function PersonDetail({ id }: { id: number }) {
   const b = personBalances(txs).get(id) ?? 0;
   if (!p) return null;
 
+  // La cartera con la que se suele mover el dinero con esta persona (la del último préstamo)
+  const walletFor = () => {
+    const last = list.find((t) => t.type === 'debt' && wallets.some((w) => w.id === t.walletId));
+    return last?.walletId ?? wallets[0]?.id!;
+  };
+
   async function forgive() {
     if (!(await confirmDialog(`¿Dar por perdidos ${fmt(b)}?`, { message: 'Se apuntarán como un gasto (regalo) de hoy y quedaréis en paz.', confirm: 'Dar por perdido', destructive: false }))) return;
-    const cats = await db.categories.toArray();
-    const gift = cats.find((c) => c.type === 'expense' && c.name === 'Regalos') ?? cats.find((c) => c.type === 'expense' && c.name === 'Otros');
-    const w = wallets[0]?.id!;
+    const gift = await findCategory('expense', ['Regalos', 'Otros']);
+    const w = walletFor();
     await db.transaction('rw', db.transactions, async () => {
       // El dinero ya salió: cerramos la deuda con una devolución "virtual" y la convertimos en gasto
       await db.transactions.add({ type: 'debt', dir: 'in', personId: id, amount: b, walletId: w, date: todayISO(), note: 'Perdonado', createdAt: Date.now() });
-      await db.transactions.add({ type: 'expense', amount: b, walletId: w, categoryId: gift?.id, date: todayISO(), note: `Perdonado a ${p!.name}`, createdAt: Date.now() });
+      await db.transactions.add({ type: 'expense', amount: b, walletId: w, categoryId: gift, personId: id, date: todayISO(), note: `Perdonado a ${p!.name}`, createdAt: Date.now() });
     });
     toast('Deuda saldada');
+  }
+
+  /** «Le debes» pero no hay que devolverlo (p. ej. te devolvió de más): ese dinero ya está en tu cartera y es tuyo. */
+  async function keep() {
+    const v = -b;
+    if (!(await confirmDialog(`¿Te quedas ${fmt(v)}?`, { message: `No se lo tienes que devolver a ${p!.name}: se apuntarán como un ingreso de hoy y quedaréis en paz.`, confirm: 'Contar como ingreso', destructive: false }))) return;
+    const cat = await findCategory('income', ['Otros ingresos', 'Extra', 'Regalos']);
+    const w = walletFor();
+    await db.transaction('rw', db.transactions, async () => {
+      // El dinero ya entró: cerramos la deuda con un pago "virtual" y lo convertimos en ingreso
+      await db.transactions.add({ type: 'debt', dir: 'out', personId: id, amount: v, walletId: w, date: todayISO(), note: 'Era para mí', createdAt: Date.now() });
+      await db.transactions.add({ type: 'income', amount: v, walletId: w, categoryId: cat, personId: id, date: todayISO(), note: `De ${p!.name}`, createdAt: Date.now() });
+    });
+    toast(`En paz, y ${fmt(v)} de ingreso`);
   }
 
   async function remove() {
@@ -115,6 +134,7 @@ export function PersonDetail({ id }: { id: number }) {
           </Press>
         </div>
         {b > 0 && <Press scale={0.97} onClick={forgive} className="mt-3 w-full text-center text-[13px] font-semibold text-ink3">No me lo va a devolver · dar por perdido</Press>}
+        {b < 0 && <Press scale={0.97} onClick={keep} className="mt-3 w-full text-center text-[13px] font-semibold text-ink3">No tengo que devolverlo · contar como ingreso</Press>}
       </div>
       <TxList txs={list} empty={<Empty icon="receipt" title="Sin movimientos" />} />
     </Page>

@@ -37,10 +37,26 @@ const toUser = (u: User | null): CloudUser | null => (u ? { uid: u.uid, name: u.
 let current: CloudUser | null = null;
 export const currentUser = () => current;
 const subs = new Set<(u: CloudUser | null) => void>();
-export function onUser(cb: (u: CloudUser | null) => void) {
+/**
+ * Avisa de la sesión ahora y cada vez que cambie. Las pantallas que enseñan la cuenta (Ajustes, bienvenida, pareja…)
+ * cargan Firebase al abrirse (init), para que «Entrar con Google» responda al momento.
+ */
+export function onUser(cb: (u: CloudUser | null) => void, { init = true } = {}) {
   subs.add(cb);
   cb(current);
+  if (init) setTimeout(() => initCloud().catch(() => {}), 0);
   return () => { subs.delete(cb); };
+}
+
+// ¿Había sesión la última vez? '1' sí · '0' no · sin valor: no se sabe (versión anterior o primera vez).
+// Si no había, Firebase (unos 650 KB) no se carga al arrancar: la app abre y responde antes.
+const LS_CLOUD = 'eco:cloud';
+const rememberSession = (u: User | null) => { try { localStorage.setItem(LS_CLOUD, u ? '1' : '0'); } catch { /* sin almacenamiento */ } };
+export function cloudNeededAtStart() {
+  if (!cloudEnabled) return false;
+  let v: string | null = null;
+  try { v = localStorage.getItem(LS_CLOUD); } catch { /* sin almacenamiento */ }
+  return v !== '0' || !!readHandoff();
 }
 
 // ---------- Traspaso de sesión Safari → app instalada ----------
@@ -61,8 +77,15 @@ function readHandoff(): { i?: string; a?: string } | null {
 }
 const clearHandoff = () => { document.cookie = `${HANDOFF}=; max-age=0; path=${cookiePath()}`; };
 
-export async function initCloud() {
-  if (!cloudEnabled) return;
+let inited: Promise<void> | null = null;
+/** Arranca la sesión (una sola vez). */
+export function initCloud() {
+  if (!cloudEnabled) return Promise.resolve();
+  inited ??= startCloud().catch((e) => { inited = null; throw e; });
+  return inited;
+}
+
+async function startCloud() {
   const { auth } = await load();
   const { onAuthStateChanged, getRedirectResult, GoogleAuthProvider, signInWithCredential } = await import('firebase/auth');
   getRedirectResult(auth).then((r) => { if (r) { const c = GoogleAuthProvider.credentialFromResult(r); saveHandoff(c?.idToken, c?.accessToken); } }).catch(() => {});
@@ -74,12 +97,14 @@ export async function initCloud() {
   }
   if (h && auth.currentUser) clearHandoff();
   onAuthStateChanged(auth, (u) => {
+    rememberSession(u);
     current = toUser(u);
     subs.forEach((s) => s(current));
   });
 }
 
 export async function signInWithGoogle() {
+  initCloud().catch(() => {}); // para enterarse de la sesión nueva
   const { auth } = await load();
   const { GoogleAuthProvider, signInWithPopup, signInWithRedirect } = await import('firebase/auth');
   const provider = new GoogleAuthProvider();
@@ -123,7 +148,20 @@ async function snapshot() {
   });
 }
 
-export async function backupNow() {
+// Solo una copia subiendo a la vez: con poca cobertura, Firestore manda las escrituras en orden y una copia grande
+// encolada detrás de otra retrasaría también lo que compartes con tu pareja
+let uploading: Promise<number> | null = null;
+let uploadAgain = false;
+export function backupNow(): Promise<number> {
+  if (uploading) { uploadAgain = true; return uploading; }
+  uploading = uploadBackup().finally(() => {
+    uploading = null;
+    if (uploadAgain) { uploadAgain = false; scheduleBackup(); }
+  });
+  return uploading;
+}
+
+async function uploadBackup() {
   if (!current) throw new Error('Inicia sesión primero');
   const { fs } = await load();
   const { doc, writeBatch } = await import('firebase/firestore');
@@ -168,10 +206,21 @@ export async function restoreFromCloud() {
   });
 }
 
-// Copia automática: un rato después del último cambio
+// Copia automática: un rato después del último cambio. Sin conexión espera a que vuelva (no se encola nada).
 let timer: ReturnType<typeof setTimeout> | undefined;
+let waitingOnline = false;
 export function scheduleBackup() {
   if (!current) return;
   clearTimeout(timer);
-  timer = setTimeout(() => backupNow().catch(() => {}), 20_000);
+  timer = setTimeout(() => {
+    if (!navigator.onLine) { waitingOnline = true; return; }
+    backupNow().catch(() => {});
+  }, 20_000);
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    if (!waitingOnline) return;
+    waitingOnline = false;
+    scheduleBackup();
+  });
 }
